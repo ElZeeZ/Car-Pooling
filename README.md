@@ -1,6 +1,6 @@
-# Smart Carpooling Web-Based System
+﻿# Smart Carpooling Web-Based System
 
-This repository is the starting backbone for the carpooling web app described in the SRS and project proposal. It is organized as a simple React frontend, Node.js + Express backend, and MySQL database schema that can be imported through HeidiSQL.
+This repository is a full prototype for the carpooling web app described in the SRS and project proposal. It is organized as a simple React frontend, Node.js + Express backend, and MySQL database schema that can be imported through HeidiSQL.
 
 ## Project Structure
 
@@ -43,24 +43,27 @@ The default ports are:
 - Frontend: `http://localhost:5173`
 - Backend API: `http://localhost:5000/api`
 
-## Moving to Another Laptop
+## Server Setup With Tailscale
 
-When sending this project to another PC, do not copy `node_modules`, `client/node_modules`, `client/dist`, or private `.env` files. The project is portable from the source files plus `package-lock.json`.
+For testing the app from multiple devices, install and sign in to [Tailscale](https://tailscale.com/) on the computer running the project and on any device that needs access.
 
-On the new laptop:
+Run:
 
-1. Install Node.js and MySQL/MariaDB.
-2. Import [database/schema.sql](database/schema.sql) into HeidiSQL or another MySQL client.
-3. Run `npm install` from the project root.
-4. Copy [server/.env.example](server/.env.example) to `server/.env` and update the database user, password, database name, JWT secret, admin email, and admin password.
-5. Copy [client/.env.example](client/.env.example) to `client/.env` only if you need custom ports or a custom API URL. Leave `VITE_API_BASE_URL` empty for the automatic local/Tailscale behavior.
-6. Run `npm run dev`.
+```bash
+npm run dev:vpn
+```
 
-For Tailscale multi-device testing, run `npm run dev:vpn`. The script forwards the local Vite app through Tailscale Serve over HTTPS, which is useful for phone testing because browser location access works more reliably on secure origins. If you change the frontend port, update `VITE_DEV_PORT` in `client/.env` or set it in the shell before running the script.
+This starts the local development servers and configures Tailscale Serve to expose the Vite frontend over HTTPS. The script prints a Tailscale URL that can be opened from another device on the same Tailscale network. The backend is reached through the same HTTPS origin using the `/api` proxy, so `/api/health` should also work through the printed Tailscale URL.
 
-## Map Setup
+Useful VPN commands:
 
-Passenger and driver home pages use the browser geolocation API with Leaflet and OpenStreetMap tiles. The `Relocate` button only recenters the map on the current device location; it does not keep snapping the map while you drive. Driver location is pushed to the backend on a lean 3-5 second cadence only when the car meaningfully moves, with a light heartbeat for reliability, so passenger and driver maps stay live without burning as much mobile data.
+```bash
+npm run vpn:status
+npm run vpn:serve
+npm run vpn:stop
+```
+
+If the frontend port is changed, set `VITE_DEV_PORT` in `client/.env` or in the shell before running the VPN command.
 
 ## Backend Notes
 
@@ -75,3 +78,5 @@ The API is intentionally scaffolded in layers so each requirement can be filled 
 ## Database Notes
 
 The SRS ERD uses separate `drivers`, `passengers`, `trips`, `bookings`, `messages`, and `reports` tables, with wallet/card support added for local payment testing. Booking payment fields stay on `bookings`; driver ratings are stored on completed bookings and averaged into the driver record. Admin access is handled by backend configuration instead of a database table.
+
+
