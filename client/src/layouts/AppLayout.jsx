@@ -6,11 +6,47 @@ const AppLayout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const navigation = navigationByRole[user?.role] ?? [];
+  const mapNavigationItem = navigation.find((item) => item.label === 'Map');
+  const accountNavigation = navigation.filter((item) => item.label !== 'Map');
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
+
+  if (user?.role === 'driver' || user?.role === 'passenger') {
+    return (
+      <div className="account-shell">
+        <header className="account-toolbar">
+          <div className="toolbar-welcome">
+            <span>Welcome {user?.full_name ?? user?.email}</span>
+            <small>{user?.role} dashboard</small>
+          </div>
+
+          {mapNavigationItem ? (
+            <NavLink className="map-home-button account-map-button" to={mapNavigationItem.path}>
+              {mapNavigationItem.label}
+            </NavLink>
+          ) : null}
+
+          <nav className="map-nav account-nav" aria-label="Main navigation">
+            {accountNavigation.map((item) => (
+              <NavLink key={item.path} to={item.path}>
+                {item.label}
+              </NavLink>
+            ))}
+            <button type="button" onClick={handleLogout}>
+              Sign out
+            </button>
+          </nav>
+        </header>
+
+        <main className="account-content">
+          <Outlet />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">

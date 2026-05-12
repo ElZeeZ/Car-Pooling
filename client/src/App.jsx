@@ -11,7 +11,9 @@ import NotFoundPage from './pages/NotFoundPage.jsx';
 import PassengerDashboard from './pages/PassengerDashboard.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
+import TransactionHistoryPage from './pages/TransactionHistoryPage.jsx';
 import TripsPage from './pages/TripsPage.jsx';
+import WalletPage from './pages/WalletPage.jsx';
 
 const App = () => (
   <Routes>
@@ -20,20 +22,26 @@ const App = () => (
     <Route path="/register" element={<RegisterPage />} />
 
     <Route element={<ProtectedRoute roles={['passenger', 'driver', 'admin']} />}>
+      <Route path="/dashboard" element={<DashboardRedirect />} />
+
+      <Route element={<ProtectedRoute roles={['passenger']} />}>
+        <Route path="/passenger" element={<PassengerDashboard />} />
+      </Route>
+
+      <Route element={<ProtectedRoute roles={['driver']} />}>
+        <Route path="/driver" element={<DriverDashboard />} />
+      </Route>
+
       <Route element={<AppLayout />}>
-        <Route path="/dashboard" element={<DashboardRedirect />} />
-        <Route element={<ProtectedRoute roles={['passenger']} />}>
-          <Route path="/passenger" element={<PassengerDashboard />} />
-        </Route>
-        <Route element={<ProtectedRoute roles={['driver']} />}>
-          <Route path="/driver" element={<DriverDashboard />} />
-        </Route>
         <Route element={<ProtectedRoute roles={['admin']} />}>
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/transactions" element={<TransactionHistoryPage />} />
         </Route>
+
         <Route path="/trips" element={<TripsPage />} />
         <Route path="/bookings" element={<BookingsPage />} />
         <Route path="/messages" element={<MessagesPage />} />
+        <Route path="/wallet" element={<WalletPage />} />
         <Route path="/reports" element={<ReportsPage />} />
       </Route>
     </Route>

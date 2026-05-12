@@ -1,4 +1,24 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000/api';
+const resolveApiBaseUrl = () => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+
+  const apiPort = import.meta.env.VITE_API_PORT || '5000';
+
+  if (typeof window === 'undefined') {
+    return `http://localhost:${apiPort}/api`;
+  }
+
+  const { protocol, hostname } = window.location;
+
+  if (protocol === 'https:') {
+    return '/api';
+  }
+
+  return `http://${hostname}:${apiPort}/api`;
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 const getToken = () => localStorage.getItem('carpooling_token');
 
@@ -22,7 +42,9 @@ export const apiRequest = async (path, options = {}) => {
   const payload = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(payload.message ?? 'Request failed.');
+    const error = new Error(payload.message ?? 'Request failed.');
+    error.status = response.status;
+    throw error;
   }
 
   return payload;

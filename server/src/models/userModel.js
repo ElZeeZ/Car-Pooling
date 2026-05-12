@@ -5,7 +5,7 @@ const ROLE_CONFIG = {
     table: 'drivers',
     idColumn: 'driver_id',
     fields:
-      'driver_id AS id, full_name, email, phone, password_hash, license_number, verification_status, vehicle_info, available_seats, account_status'
+      'driver_id AS id, full_name, email, phone, password_hash, license_number, verification_status, vehicle_info, available_seats, rating_average, rating_count, account_status'
   },
   passenger: {
     table: 'passengers',

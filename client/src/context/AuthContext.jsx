@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/http.js';
 
 const AuthContext = createContext(null);
@@ -11,11 +11,11 @@ const storedUser = () => {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(storedUser);
 
-  const saveSession = ({ token, user: nextUser }) => {
+  const saveSession = useCallback(({ token, user: nextUser }) => {
     localStorage.setItem('carpooling_token', token);
     localStorage.setItem('carpooling_user', JSON.stringify(nextUser));
     setUser(nextUser);
-  };
+  }, []);
 
   const login = async (credentials) => {
     const result = await api.post('/auth/login', credentials);
@@ -26,20 +26,51 @@ export const AuthProvider = ({ children }) => {
   const registerPassenger = async (payload) => {
     const result = await api.post('/auth/register/passenger', payload);
     saveSession(result);
-    return result.user;
+    return result;
   };
 
   const registerDriver = async (payload) => {
     const result = await api.post('/auth/register/driver', payload);
-    saveSession(result);
-    return result.user;
+    if (result.token) {
+      saveSession(result);
+    }
+    return result;
   };
 
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem('carpooling_token');
     localStorage.removeItem('carpooling_user');
     setUser(null);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!user) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const checkAccountStatus = async () => {
+      try {
+        const result = await api.get('/auth/me');
+        if (!cancelled && result.user) {
+          localStorage.setItem('carpooling_user', JSON.stringify(result.user));
+          setUser(result.user);
+        }
+      } catch (requestError) {
+        if (!cancelled && [401, 403, 404].includes(requestError.status)) {
+          logout();
+        }
+      }
+    };
+
+    const intervalId = window.setInterval(checkAccountStatus, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [logout, user?.id, user?.role]);
 
   const value = useMemo(
     () => ({

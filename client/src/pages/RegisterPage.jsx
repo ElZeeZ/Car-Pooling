@@ -20,6 +20,7 @@ const RegisterPage = () => {
   const { registerDriver, registerPassenger } = useAuth();
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
 
   const updateField = (event) => {
@@ -32,6 +33,7 @@ const RegisterPage = () => {
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError('');
+    setNotice('');
 
     if (form.password !== form.confirmPassword) {
       setError('Passwords must match.');
@@ -47,7 +49,7 @@ const RegisterPage = () => {
         phone: form.phone,
         password: form.password
       };
-      const user =
+      const result =
         form.role === 'driver'
           ? await registerDriver({
               ...payload,
@@ -57,6 +59,17 @@ const RegisterPage = () => {
             })
           : await registerPassenger(payload);
 
+      if (result.pendingVerification) {
+        navigate('/login', {
+          state: {
+            notice: 'Await admin verification. You can sign in after your driver account is approved.'
+          },
+          replace: true
+        });
+        return;
+      }
+
+      const user = result.user;
       navigate(getHomePathForRole(user.role));
     } catch (requestError) {
       setError(requestError.message);
@@ -74,6 +87,7 @@ const RegisterPage = () => {
         </div>
 
         {error ? <p className="alert">{error}</p> : null}
+        {notice ? <p className="success-alert">{notice}</p> : null}
 
         <form className="form-grid" onSubmit={handleSubmit}>
           <label>

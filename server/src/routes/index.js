@@ -8,6 +8,7 @@ import messageRoutes from './message.routes.js';
 import passengerRoutes from './passenger.routes.js';
 import reportRoutes from './report.routes.js';
 import tripRoutes from './trip.routes.js';
+import walletRoutes from './wallet.routes.js';
 
 const router = Router();
 
@@ -30,6 +31,7 @@ router.use('/trips', tripRoutes);
 router.use('/bookings', bookingRoutes);
 router.use('/messages', messageRoutes);
 router.use('/reports', reportRoutes);
+router.use('/wallet', walletRoutes);
 router.use('/admin', adminRoutes);
 
 export default router;

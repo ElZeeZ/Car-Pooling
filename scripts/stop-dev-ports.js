@@ -1,6 +1,11 @@
 const { execFileSync } = require('node:child_process');
 
-const ports = ['5000', '5173', '5174'];
+const configuredPorts = [
+  process.env.PORT || process.env.API_PORT || '5000',
+  process.env.VITE_DEV_PORT || process.env.CLIENT_PORT || '5173',
+  '5174'
+];
+const ports = [...new Set((process.env.DEV_STOP_PORTS || configuredPorts.join(',')).split(',').map((port) => port.trim()).filter(Boolean))];
 const isWindows = process.platform === 'win32';
 
 const getWindowsPids = () => {

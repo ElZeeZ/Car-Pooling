@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
+import { query } from '../config/db.js';
 import {
   createDriver,
   createPassenger,
@@ -86,6 +87,20 @@ export const loginUser = async ({ email, password }) => {
 
   const { role, user } = matches[0];
 
+  if (user.account_status === 'suspended') {
+    throw new HttpError(403, 'This account has been suspended by the administrator.');
+  }
+
+  if (role === 'driver') {
+    if (user.account_status === 'pending' || user.verification_status === 'pending') {
+      throw new HttpError(403, 'Account not verified yet.');
+    }
+
+    if (user.verification_status === 'rejected') {
+      throw new HttpError(403, 'Driver account verification was rejected.');
+    }
+  }
+
   return {
     token: signToken(user, role),
     user: sanitizeUser(user, role)
@@ -121,6 +136,23 @@ export const registerDriver = async (payload) => {
     'availableSeats'
   ]);
   await ensureEmailIsAvailable(payload.email);
+  const availableSeats = Number(payload.availableSeats);
+
+  if (!Number.isInteger(availableSeats) || availableSeats < 1 || availableSeats > 8) {
+    throw new HttpError(400, 'Driver available seats must be between 1 and 8.');
+  }
+
+  const existingLicense = await query(
+    `SELECT driver_id
+     FROM drivers
+     WHERE license_number = ?
+     LIMIT 1`,
+    [payload.licenseNumber]
+  );
+
+  if (existingLicense[0]) {
+    throw new HttpError(409, 'License number is already registered.');
+  }
 
   const passwordHash = await hashPassword(payload.password);
   const user = await createDriver({
@@ -130,11 +162,39 @@ export const registerDriver = async (payload) => {
     passwordHash,
     licenseNumber: payload.licenseNumber,
     vehicleInfo: payload.vehicleInfo,
-    availableSeats: payload.availableSeats
+    availableSeats
   });
 
+  const wallet = await query(
+    `INSERT INTO wallet_accounts (owner_type, owner_id, balance)
+     VALUES ('driver', ?, 5.00)
+     ON DUPLICATE KEY UPDATE balance = balance`,
+    [user.id]
+  );
+
+  const walletId =
+    wallet.insertId ||
+    (
+      await query(
+        `SELECT wallet_id
+         FROM wallet_accounts
+         WHERE owner_type = 'driver' AND owner_id = ?
+         LIMIT 1`,
+        [user.id]
+      )
+    )[0]?.wallet_id;
+
+  if (walletId) {
+    await query(
+      `INSERT INTO wallet_transactions (wallet_id, transaction_type, amount, description)
+       VALUES (?, 'top_up', 5.00, 'Demo driver starting balance')`,
+      [walletId]
+    );
+  }
+
   return {
-    token: signToken(user, 'driver'),
+    message: 'Driver registration submitted for administrator verification.',
+    pendingVerification: true,
     user: sanitizeUser(user, 'driver')
   };
 };
@@ -153,6 +213,20 @@ export const getCurrentUser = async ({ id, role }) => {
 
   if (!user) {
     throw new HttpError(404, 'Authenticated user was not found.');
+  }
+
+  if (user.account_status === 'suspended') {
+    throw new HttpError(403, 'This account has been suspended by the administrator.');
+  }
+
+  if (role === 'driver') {
+    if (user.account_status === 'pending' || user.verification_status === 'pending') {
+      throw new HttpError(403, 'Account not verified yet.');
+    }
+
+    if (user.verification_status === 'rejected') {
+      throw new HttpError(403, 'Driver account verification was rejected.');
+    }
   }
 
   return sanitizeUser(user, role);
