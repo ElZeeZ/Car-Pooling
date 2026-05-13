@@ -428,7 +428,15 @@ export const createDriverAcceptedBooking = asyncHandler(async (req, res) => {
 });
 
 export const updateBookingStatus = asyncHandler(async (req, res) => {
-  const { bookingStatus } = req.body;
+  const {
+    bookingStatus,
+    passengerTripKm,
+    pickupDetourKm,
+    paymentBaseAmount,
+    paymentDetourAmount,
+    paymentAmount,
+    paymentMethod
+  } = req.body;
 
   if (!bookingStatus) {
     throw new HttpError(400, 'bookingStatus is required.');
@@ -444,10 +452,27 @@ export const updateBookingStatus = asyncHandler(async (req, res) => {
     await assertPassengerOwnsBooking(req.params.bookingId, req.user.id);
   }
 
-  const result = await query('UPDATE bookings SET booking_status = ? WHERE booking_id = ?', [
-    bookingStatus,
-    req.params.bookingId
-  ]);
+  const result = await query(
+    `UPDATE bookings
+     SET booking_status = ?,
+         passenger_trip_km = COALESCE(?, passenger_trip_km),
+         pickup_detour_km = COALESCE(?, pickup_detour_km),
+         payment_base_amount = COALESCE(?, payment_base_amount),
+         payment_detour_amount = COALESCE(?, payment_detour_amount),
+         payment_amount = COALESCE(?, payment_amount),
+         payment_method = COALESCE(?, payment_method)
+     WHERE booking_id = ?`,
+    [
+      bookingStatus,
+      toNullableNumber(passengerTripKm),
+      toNullableNumber(pickupDetourKm),
+      toNullableNumber(paymentBaseAmount),
+      toNullableNumber(paymentDetourAmount),
+      toNullableNumber(paymentAmount),
+      paymentMethod ?? null,
+      req.params.bookingId
+    ]
+  );
 
   if (result.affectedRows === 0) {
     throw new HttpError(404, 'Booking not found.');

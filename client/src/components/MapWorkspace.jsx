@@ -17,11 +17,14 @@ const toolbarLinks = [
 const LEBANON_SEARCH_VIEWBOX = '35.09,34.70,36.70,33.00';
 const PICKUP_UNLOCK_METERS = 140;
 const DROPOFF_UNLOCK_METERS = 160;
+const DESTINATION_ARRIVAL_METERS = 50;
 const MAX_PASSENGER_SEATS = 8;
 const REMOTE_SYNC_INTERVAL_MS = 4000;
 const DRIVER_LOCATION_PUSH_INTERVAL_MS = 4000;
 const DRIVER_LOCATION_HEARTBEAT_MS = 15000;
 const DRIVER_LOCATION_MIN_MOVE_METERS = 8;
+const DRIVER_ROUTE_REFRESH_INTERVAL_MS = 7000;
+const DRIVER_ROUTE_REFRESH_MIN_MOVE_METERS = 18;
 const DRIVER_WORKSPACE_STORAGE_KEY = 'carpooling_driver_workspace';
 const PASSENGER_WORKSPACE_STORAGE_KEY = 'carpooling_passenger_workspace';
 const ACTIVE_BOOKING_STATUSES = ['accepted', 'picked_up', 'payment_due'];
@@ -124,6 +127,15 @@ const numberOrNull = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const hasPointCoordinates = (point) =>
+  Number.isFinite(Number(point?.lat)) && Number.isFinite(Number(point?.lng));
+
+const formatPointCoordinates = (point) =>
+  hasPointCoordinates(point) ? `Lat ${Number(point.lat).toFixed(5)}, Lng ${Number(point.lng).toFixed(5)}` : 'Lat/Lng unavailable';
+
+const pointKey = (point) =>
+  hasPointCoordinates(point) ? `${Number(point.lat).toFixed(5)},${Number(point.lng).toFixed(5)}` : 'none';
+
 const extractCoordinates = (value) => {
   const match = String(value ?? '').match(/(-?\d+(?:\.\d+)?)[,\s]+(-?\d+(?:\.\d+)?)/);
 
@@ -179,6 +191,7 @@ const bookingToDriverRequest = (booking, fallbackLocation) => {
     lat: pickupLat ?? parsedPickup?.lat ?? fallbackLocation.lat,
     lng: pickupLng ?? parsedPickup?.lng ?? fallbackLocation.lng
   };
+  const parsedDropoff = extractCoordinates(booking.dropoff_location);
   const distanceKm = distanceBetweenMeters(fallbackLocation, requestPoint) / 1000;
 
   return {
@@ -195,11 +208,15 @@ const bookingToDriverRequest = (booking, fallbackLocation) => {
     lng: requestPoint.lng,
     source: 'database',
     status: booking.booking_status,
-    dropoffLat: numberOrNull(booking.dropoff_lat),
-    dropoffLng: numberOrNull(booking.dropoff_lng),
+    dropoffLat: numberOrNull(booking.dropoff_lat) ?? parsedDropoff?.lat ?? null,
+    dropoffLng: numberOrNull(booking.dropoff_lng) ?? parsedDropoff?.lng ?? null,
     paymentAmount: Number(booking.payment_amount ?? 0).toFixed(2),
     paymentMethod: booking.payment_method ?? 'cash',
-    paymentStatus: booking.payment_status ?? 'pending'
+    paymentStatus: booking.payment_status ?? 'pending',
+    passengerTripKm: Number(booking.passenger_trip_km ?? 0),
+    pickupDetourKm: Number(booking.pickup_detour_km ?? 0),
+    paymentBaseAmount: Number(booking.payment_base_amount ?? 0),
+    paymentDetourAmount: Number(booking.payment_detour_amount ?? 0)
   };
 };
 
@@ -225,6 +242,10 @@ const bookingToPassengerRequest = (booking) => {
     paymentAmount: Number(booking.payment_amount ?? 0).toFixed(2),
     paymentMethod: booking.payment_method ?? 'cash',
     paymentStatus: booking.payment_status ?? 'pending',
+    passengerTripKm: Number(booking.passenger_trip_km ?? 0),
+    pickupDetourKm: Number(booking.pickup_detour_km ?? 0),
+    paymentBaseAmount: Number(booking.payment_base_amount ?? 0),
+    paymentDetourAmount: Number(booking.payment_detour_amount ?? 0),
     driver: {
       id: `trip-${booking.trip_id}`,
       tripId: booking.trip_id,
@@ -327,6 +348,7 @@ const PassengerPanel = ({
               >
                 <strong>{suggestion.name}</strong>
                 <span>{suggestion.address}</span>
+                <small>{formatPointCoordinates(suggestion)}</small>
               </button>
             ))}
 
@@ -358,6 +380,7 @@ const PassengerPanel = ({
         <div className="selected-place">
           <strong>{destinationConfirmed ? 'Destination confirmed' : 'Destination selected'}</strong>
           <span>{selectedDestination.label}</span>
+          <small>{formatPointCoordinates(selectedDestination)}</small>
         </div>
       ) : null}
       <label>
@@ -543,6 +566,7 @@ const DriverPanel = ({
           <p className="eyebrow">Trip details</p>
           <h3>{selectedDestination?.name ?? 'Active route'}</h3>
           <span>{selectedDestination?.label}</span>
+          {selectedDestination ? <small className="action-hint">{formatPointCoordinates(selectedDestination)}</small> : null}
           <small className="action-hint">Available seats: {availableSeats}</small>
         </div>
         <div className="metric-grid">
@@ -617,6 +641,7 @@ const DriverPanel = ({
                 >
                   <strong>{suggestion.name}</strong>
                   <span>{suggestion.address}</span>
+                  <small>{formatPointCoordinates(suggestion)}</small>
                 </button>
               ))}
 
@@ -649,6 +674,7 @@ const DriverPanel = ({
           <div className="selected-place">
             <strong>Destination selected</strong>
             <span>{selectedDestination.label}</span>
+            <small>{formatPointCoordinates(selectedDestination)}</small>
           </div>
         ) : null}
 
@@ -1018,29 +1044,73 @@ const parseKm = (value, fallback = 0) => {
   return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallback;
 };
 
-const calculatePaymentBreakdown = ({ passengerTripKm, pickupDetourKm, seatsRequested = 1 }) => {
-  const tripKm = Math.max(0.5, Number(passengerTripKm) || 2);
-  const detourKm = Math.max(0, Number(pickupDetourKm) || 0);
-  const seats = Math.max(1, Number(seatsRequested) || 1);
-  const platformBase = 0.75;
-  const passengerShare = tripKm * 0.42;
-  const detourShare = detourKm * 0.18;
-  const seatShare = (seats - 1) * 0.2;
-  const amount = Math.max(1.5, platformBase + passengerShare + detourShare + seatShare);
+const calculatePaymentBreakdown = ({ passengerTripKm, seatsRequested = 1 }) => {
+  const tripKm = Math.max(0, Number(passengerTripKm) || 0);
+  const seats = Math.max(1, Math.floor(Number(seatsRequested) || 1));
+  const baseFare = 0.5;
+  const subtotal = baseFare + tripKm;
+  const passengerMultiplier = 1 + (seats - 1) * 0.5;
+  const amount = subtotal * passengerMultiplier;
 
   return {
-    passengerTripKm: tripKm,
-    pickupDetourKm: detourKm,
-    baseAmount: passengerShare + platformBase,
-    detourAmount: detourShare,
+    passengerTripKm: Number(tripKm.toFixed(2)),
+    pickupDetourKm: 0,
+    baseAmount: Number((baseFare + tripKm).toFixed(2)),
+    detourAmount: 0,
     total: amount.toFixed(2)
   };
 };
 
-const estimatePaymentAmount = (routeSummary, seatsRequested = 1, pickupDistanceText = '') =>
+const logPaymentCalculation = ({ booking, surface = 'payment option', loggedKeys }) => {
+  if (!booking?.bookingId) {
+    return;
+  }
+
+  const key = `${surface}:${booking.bookingId}`;
+
+  if (loggedKeys?.has(key)) {
+    return;
+  }
+
+  loggedKeys?.add(key);
+
+  const passengerDistanceKm = Math.max(0, Number(booking.passengerTripKm) || 0);
+  const seats = Math.max(1, Math.floor(Number(booking.seats) || 1));
+  const basePrice = 0.5;
+  const subtotal = basePrice + passengerDistanceKm;
+  const extraPassengerMultiplier = 1 + (seats - 1) * 0.5;
+  const calculatedTotal = subtotal * extraPassengerMultiplier;
+  const chargedAmount = Number(booking.paymentAmount ?? calculatedTotal);
+
+  console.info(`[Payment calculation] ${surface} appeared for booking #${booking.bookingId}`);
+  console.info(
+    `[Payment calculation] 0.50 base + ${passengerDistanceKm.toFixed(2)} passenger km = ${subtotal.toFixed(2)}`
+  );
+
+  if (seats > 1) {
+    console.info(
+      `[Payment calculation] ${seats} passengers: ${subtotal.toFixed(2)} x ${extraPassengerMultiplier.toFixed(
+        2
+      )} = ${calculatedTotal.toFixed(2)}`
+    );
+  }
+
+  console.info('[Payment calculation] Breakdown', {
+    bookingId: booking.bookingId,
+    basePrice,
+    passengerDistanceKm,
+    driverDeviationKm: 0,
+    subtotal: Number(subtotal.toFixed(2)),
+    seats,
+    extraPassengerMultiplier,
+    calculatedTotal: Number(calculatedTotal.toFixed(2)),
+    chargedAmount: Number.isFinite(chargedAmount) ? Number(chargedAmount.toFixed(2)) : booking.paymentAmount
+  });
+};
+
+const estimatePaymentAmount = (routeSummary, seatsRequested = 1) =>
   calculatePaymentBreakdown({
     passengerTripKm: parseKm(routeSummary?.distance, 2),
-    pickupDetourKm: parseKm(pickupDistanceText, 0),
     seatsRequested
   }).total;
 
@@ -1079,6 +1149,20 @@ const fetchDrivingRoute = async (origin, destination) => {
   };
 };
 
+const estimateRouteDistanceKm = async (origin, destination, fallbackKm = 0) => {
+  if (!hasPointCoordinates(origin) || !hasPointCoordinates(destination)) {
+    return fallbackKm;
+  }
+
+  try {
+    const route = await fetchDrivingRoute(origin, destination);
+    return Number((route.distanceMeters / 1000).toFixed(2));
+  } catch {
+    const directDistanceKm = distanceBetweenMeters(origin, destination) / 1000;
+    return Number((Number.isFinite(directDistanceKm) ? directDistanceKm : fallbackKm).toFixed(2));
+  }
+};
+
 const MapWorkspace = ({ role }) => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -1089,6 +1173,20 @@ const MapWorkspace = ({ role }) => {
     location: null,
     at: 0
   });
+  const lastDriverRouteRefreshRef = useRef({
+    location: null,
+    targetKey: '',
+    pickupKey: '',
+    phase: ''
+  });
+  const lastPassengerRouteRefreshRef = useRef({
+    location: null,
+    targetKey: '',
+    pickupKey: '',
+    status: '',
+    bookingId: null
+  });
+  const loggedPaymentOptionsRef = useRef(new Set());
   const workspaceUserId = user?.id ?? user?.email ?? 'guest';
   const driverWorkspaceStorageKey = workspaceStorageKey(DRIVER_WORKSPACE_STORAGE_KEY, workspaceUserId);
   const passengerWorkspaceStorageKey = workspaceStorageKey(PASSENGER_WORKSPACE_STORAGE_KEY, workspaceUserId);
@@ -1156,6 +1254,7 @@ const MapWorkspace = ({ role }) => {
   const [tripStatus, setTripStatus] = useState(() => initialDriverWorkspace?.tripStatus ?? 'idle');
   const [routeError, setRouteError] = useState(() => initialDriverWorkspace?.routeError ?? '');
   const [driverHeading, setDriverHeading] = useState(() => initialDriverWorkspace?.driverHeading ?? 0);
+  const [driverRouteLeg, setDriverRouteLeg] = useState({ phase: '', targetKey: '' });
   const [pendingRequests, setPendingRequests] = useState(() => initialDriverWorkspace?.pendingRequests ?? []);
   const pendingRequestsRef = useRef(pendingRequests);
   const [acceptedRequest, setAcceptedRequest] = useState(() => initialDriverWorkspace?.acceptedRequest ?? null);
@@ -1256,6 +1355,21 @@ const MapWorkspace = ({ role }) => {
     [sentPassengerRequests]
   );
   const passengerBookingLocked = Boolean(activePassengerBooking);
+  const passengerOnBoard =
+    role === 'passenger' && ['picked_up', 'payment_due'].includes(activePassengerBooking?.status);
+  const activePassengerDriverPoint = useMemo(() => {
+    if (!activePassengerBooking?.driver) {
+      return location;
+    }
+
+    return hasPointCoordinates(activePassengerBooking.driver)
+      ? {
+          lat: Number(activePassengerBooking.driver.lat),
+          lng: Number(activePassengerBooking.driver.lng)
+        }
+      : location;
+  }, [activePassengerBooking, location]);
+  const mapLocation = passengerOnBoard ? activePassengerDriverPoint : location;
   const mapDrivers = useMemo(
     () => (role === 'passenger' ? (activePassengerBooking && selectedDriver ? [selectedDriver] : passengerDrivers) : []),
     [activePassengerBooking, passengerDrivers, role, selectedDriver]
@@ -1265,14 +1379,46 @@ const MapWorkspace = ({ role }) => {
       return [];
     }
 
-    const sourceRequests = acceptedRequest ? [acceptedRequest] : pendingRequests;
+    const sourceRequests = acceptedRequest ? (bookingPhase === 'pickup' ? [acceptedRequest] : []) : pendingRequests;
 
     return sourceRequests.map((request) => ({
       ...request,
       ...getRequestPoint(location, request),
       selected: acceptedRequest?.id === request.id
     }));
-  }, [acceptedRequest, location.lat, location.lng, pendingRequests, role]);
+  }, [acceptedRequest, bookingPhase, location.lat, location.lng, pendingRequests, role]);
+  const passengerDropoffMarkers = useMemo(() => {
+    if (role !== 'driver') {
+      return [];
+    }
+
+    const sourceRequests = acceptedRequest ? [acceptedRequest] : pendingRequests;
+
+    return sourceRequests
+      .map((request) => {
+        const parsedDropoff = extractCoordinates(request.dropoff);
+        const dropoffPoint =
+          hasPointCoordinates({ lat: request.dropoffLat, lng: request.dropoffLng })
+            ? {
+                lat: Number(request.dropoffLat),
+                lng: Number(request.dropoffLng)
+              }
+            : parsedDropoff;
+
+        if (!dropoffPoint) {
+          return null;
+        }
+
+        return {
+          id: `${request.id}-dropoff`,
+          passenger: request.passenger,
+          label: request.dropoff,
+          lat: dropoffPoint.lat,
+          lng: dropoffPoint.lng
+        };
+      })
+      .filter(Boolean);
+  }, [acceptedRequest, pendingRequests, role]);
   const acceptedPickupPoint = useMemo(
     () => (acceptedRequest ? getRequestPoint(location, acceptedRequest) : null),
     [acceptedRequest, location]
@@ -1295,6 +1441,14 @@ const MapWorkspace = ({ role }) => {
     () => distanceBetweenMeters(location, acceptedDropoffPoint),
     [acceptedDropoffPoint, location]
   );
+  const destinationDistanceMeters = useMemo(
+    () => distanceBetweenMeters(location, selectedDestination),
+    [location, selectedDestination]
+  );
+  const mainDestinationLegReady =
+    bookingPhase === 'idle' &&
+    driverRouteLeg.phase === 'idle' &&
+    driverRouteLeg.targetKey === pointKey(selectedDestination);
   const canPickupPassenger = bookingPhase === 'pickup' && pickupDistanceMeters <= PICKUP_UNLOCK_METERS;
   const canDropoffPassenger = bookingPhase === 'riding' && dropoffDistanceMeters <= DROPOFF_UNLOCK_METERS;
   const pickupActionHint = canPickupPassenger ? 'Pickup area reached.' : '';
@@ -1485,32 +1639,50 @@ const MapWorkspace = ({ role }) => {
 
         if (activeBooking) {
           previousPassengerActiveBookingRef.current = Number(activeBooking.bookingId);
+          const dropoffPoint =
+            hasPointCoordinates({ lat: activeBooking.dropoffLat, lng: activeBooking.dropoffLng })
+              ? {
+                  lat: Number(activeBooking.dropoffLat),
+                  lng: Number(activeBooking.dropoffLng)
+                }
+              : currentLocation;
           setSelectedDriver(activeBooking.driver);
           setSelectedPassengerDestination({
             id: `booking-dropoff-${activeBooking.bookingId}`,
             name: 'Booking drop-off',
             label: activeBooking.dropoff,
             address: activeBooking.dropoff,
-            lat: activeBooking.dropoffLat ?? currentLocation.lat,
-            lng: activeBooking.dropoffLng ?? currentLocation.lng
+            lat: dropoffPoint.lat,
+            lng: dropoffPoint.lng
           });
           setPassengerDestinationQuery(activeBooking.dropoff);
           setPassengerManualMarkerMode(false);
           setPassengerDestinationConfirmed(true);
           setRequestedSeats(String(activeBooking.seats));
           const driverPoint =
-            activeBooking.driver.lat && activeBooking.driver.lng
-              ? { lat: activeBooking.driver.lat, lng: activeBooking.driver.lng }
+            hasPointCoordinates(activeBooking.driver)
+              ? {
+                  lat: Number(activeBooking.driver.lat),
+                  lng: Number(activeBooking.driver.lng)
+                }
               : currentLocation;
           const pickupPoint =
-            activeBooking.pickupLat && activeBooking.pickupLng
-              ? { lat: activeBooking.pickupLat, lng: activeBooking.pickupLng }
+            hasPointCoordinates({ lat: activeBooking.pickupLat, lng: activeBooking.pickupLng })
+              ? {
+                  lat: Number(activeBooking.pickupLat),
+                  lng: Number(activeBooking.pickupLng)
+                }
               : currentLocation;
           const driverPickupDistance = distanceBetweenMeters(driverPoint, pickupPoint);
 
           if (activeBooking.paymentStatus === 'cash_pending') {
             setPassengerRequestStatus('Cash selected. Wait for the driver to confirm that payment was collected.');
           } else if (activeBooking.status === 'payment_due') {
+            logPaymentCalculation({
+              booking: activeBooking,
+              surface: 'passenger payment option',
+              loggedKeys: loggedPaymentOptionsRef.current
+            });
             setPassengerRequestStatus('Ride complete. Choose cash or card to finish payment.');
           } else if (activeBooking.status === 'picked_up') {
             setPassengerRequestStatus(`You have been picked up by ${activeBooking.driverName}. Wait until the driver reaches your destination.`);
@@ -1526,43 +1698,79 @@ const MapWorkspace = ({ role }) => {
           }
 
           const driverDestination =
-            activeBooking.driver.destinationLat && activeBooking.driver.destinationLng
-              ? { lat: activeBooking.driver.destinationLat, lng: activeBooking.driver.destinationLng }
-              : {
-                  lat: activeBooking.dropoffLat ?? currentLocation.lat,
-                  lng: activeBooking.dropoffLng ?? currentLocation.lng
-                };
+            hasPointCoordinates({
+              lat: activeBooking.driver.destinationLat,
+              lng: activeBooking.driver.destinationLng
+            })
+              ? {
+                  lat: Number(activeBooking.driver.destinationLat),
+                  lng: Number(activeBooking.driver.destinationLng)
+                }
+              : dropoffPoint;
+          const passengerOnRide = ['picked_up', 'payment_due'].includes(activeBooking.status);
+          const routeTarget = passengerOnRide ? dropoffPoint : driverDestination;
+          const pickupTarget = passengerOnRide ? null : pickupPoint;
+          const lastRefresh = lastPassengerRouteRefreshRef.current;
+          const movedEnough =
+            !lastRefresh.location ||
+            distanceBetweenMeters(lastRefresh.location, driverPoint) >= DRIVER_ROUTE_REFRESH_MIN_MOVE_METERS;
+          const targetKey = pointKey(routeTarget);
+          const pickupKey = pointKey(pickupTarget);
 
           const shouldRefreshRoutes =
             Boolean(newlyAcceptedBooking) ||
             routePathRef.current.length === 0 ||
-            pickupRoutePathRef.current.length === 0;
+            (!passengerOnRide && pickupRoutePathRef.current.length === 0) ||
+            movedEnough ||
+            lastRefresh.bookingId !== Number(activeBooking.bookingId) ||
+            lastRefresh.status !== activeBooking.status ||
+            lastRefresh.targetKey !== targetKey ||
+            lastRefresh.pickupKey !== pickupKey;
 
           if (shouldRefreshRoutes) {
+            lastPassengerRouteRefreshRef.current = {
+              location: driverPoint,
+              targetKey,
+              pickupKey,
+              status: activeBooking.status,
+              bookingId: Number(activeBooking.bookingId)
+            };
+
             try {
-              const driverRoute = await fetchDrivingRoute(driverPoint, driverDestination);
+              const driverRoute = await fetchDrivingRoute(driverPoint, routeTarget);
               if (isMounted) {
                 setRoutePath(driverRoute.path);
               }
             } catch {
               if (isMounted) {
-                setRoutePath(createStraightFallbackRoute(driverPoint, driverDestination));
+                setRoutePath(createStraightFallbackRoute(driverPoint, routeTarget));
               }
             }
 
-            try {
-              const pickupRoute = await fetchDrivingRoute(driverPoint, currentLocation);
-              if (isMounted) {
-                setPickupRoutePath(pickupRoute.path);
+            if (pickupTarget) {
+              try {
+                const pickupRoute = await fetchDrivingRoute(driverPoint, pickupTarget);
+                if (isMounted) {
+                  setPickupRoutePath(pickupRoute.path);
+                }
+              } catch {
+                if (isMounted) {
+                  setPickupRoutePath(createStraightFallbackRoute(driverPoint, pickupTarget));
+                }
               }
-            } catch {
-              if (isMounted) {
-                setPickupRoutePath(createStraightFallbackRoute(driverPoint, currentLocation));
-              }
+            } else if (isMounted) {
+              setPickupRoutePath([]);
             }
           }
         } else {
           previousPassengerActiveBookingRef.current = null;
+          lastPassengerRouteRefreshRef.current = {
+            location: null,
+            targetKey: '',
+            pickupKey: '',
+            status: '',
+            bookingId: null
+          };
 
           if (activeBookings.length === 0 && sentPassengerRequestsRef.current.length > 0) {
             setSelectedDriver(null);
@@ -1831,10 +2039,27 @@ const MapWorkspace = ({ role }) => {
                   status: booking.booking_status,
                   paymentAmount: Number(booking.payment_amount ?? currentRequest.paymentAmount ?? 0).toFixed(2),
                   paymentMethod: booking.payment_method ?? currentRequest.paymentMethod ?? 'cash',
-                  paymentStatus: booking.payment_status ?? currentRequest.paymentStatus ?? 'pending'
+                  paymentStatus: booking.payment_status ?? currentRequest.paymentStatus ?? 'pending',
+                  passengerTripKm: Number(booking.passenger_trip_km ?? currentRequest.passengerTripKm ?? 0),
+                  pickupDetourKm: Number(booking.pickup_detour_km ?? currentRequest.pickupDetourKm ?? 0),
+                  paymentBaseAmount: Number(booking.payment_base_amount ?? currentRequest.paymentBaseAmount ?? 0),
+                  paymentDetourAmount: Number(booking.payment_detour_amount ?? currentRequest.paymentDetourAmount ?? 0)
                 }
               : currentRequest
           );
+          if (booking.booking_status === 'payment_due') {
+            logPaymentCalculation({
+              booking: {
+                bookingId: booking.booking_id,
+                seats: booking.seats_requested,
+                passengerTripKm: booking.passenger_trip_km,
+                pickupDetourKm: booking.pickup_detour_km,
+                paymentAmount: booking.payment_amount
+              },
+              surface: 'driver payment option',
+              loggedKeys: loggedPaymentOptionsRef.current
+            });
+          }
           setBookingPhase(bookingStatusToDriverPhase(booking.booking_status));
         }
       } catch {
@@ -2033,6 +2258,110 @@ const MapWorkspace = ({ role }) => {
       window.clearInterval(timer);
     };
   }, [activeTripId, role, status, tripStatus]);
+
+  useEffect(() => {
+    if (role !== 'driver' || tripStatus !== 'active' || !selectedDestination) {
+      return undefined;
+    }
+
+    let isMounted = true;
+    let inFlight = false;
+
+    const refreshDriverRoutes = async ({ force = false } = {}) => {
+      if (!isMounted || inFlight) {
+        return;
+      }
+
+      const currentLocation = latestLocationRef.current;
+      const routeTarget =
+        bookingPhase === 'riding' && acceptedDropoffPoint ? acceptedDropoffPoint : selectedDestination;
+      const pickupTarget =
+        acceptedRequest && bookingPhase === 'pickup' ? getRequestPoint(currentLocation, acceptedRequest) : null;
+
+      if (!hasPointCoordinates(currentLocation) || !hasPointCoordinates(routeTarget)) {
+        return;
+      }
+
+      const targetKey = pointKey(routeTarget);
+      const pickupKey = pointKey(pickupTarget);
+      const lastRefresh = lastDriverRouteRefreshRef.current;
+      const movedEnough =
+        !lastRefresh.location ||
+        distanceBetweenMeters(lastRefresh.location, currentLocation) >= DRIVER_ROUTE_REFRESH_MIN_MOVE_METERS;
+      const routeChanged =
+        lastRefresh.targetKey !== targetKey ||
+        lastRefresh.pickupKey !== pickupKey ||
+        lastRefresh.phase !== bookingPhase;
+
+      if (!force && !movedEnough && !routeChanged) {
+        return;
+      }
+
+      lastDriverRouteRefreshRef.current = {
+        location: currentLocation,
+        targetKey,
+        pickupKey,
+        phase: bookingPhase
+      };
+      setDriverRouteLeg({ phase: bookingPhase, targetKey });
+      inFlight = true;
+
+      try {
+        const refreshedRoute = await fetchDrivingRoute(currentLocation, routeTarget);
+
+        if (isMounted) {
+          setRoutePath(refreshedRoute.path);
+          setRouteSummary(refreshedRoute.summary);
+          setDriverHeading(calculateBearing(currentLocation, refreshedRoute.path[1] ?? routeTarget));
+        }
+      } catch {
+        if (isMounted) {
+          setRoutePath(createStraightFallbackRoute(currentLocation, routeTarget));
+          setRouteSummary(null);
+          setDriverHeading(calculateBearing(currentLocation, routeTarget));
+        }
+      }
+
+      if (pickupTarget) {
+        try {
+          const refreshedPickupRoute = await fetchDrivingRoute(currentLocation, pickupTarget);
+
+          if (isMounted) {
+            setPickupRoutePath(refreshedPickupRoute.path);
+            setPickupRouteSummary(refreshedPickupRoute.summary);
+            setPickupRouteStatus('ready');
+          }
+        } catch {
+          if (isMounted) {
+            setPickupRoutePath(createStraightFallbackRoute(currentLocation, pickupTarget));
+            setPickupRouteSummary(null);
+            setPickupRouteStatus('ready');
+          }
+        }
+      } else if (isMounted && pickupRoutePathRef.current.length > 0) {
+        setPickupRoutePath([]);
+        setPickupRouteSummary(null);
+        setPickupRouteStatus('idle');
+      }
+
+      inFlight = false;
+    };
+
+    refreshDriverRoutes({ force: true });
+    const timer = window.setInterval(refreshDriverRoutes, DRIVER_ROUTE_REFRESH_INTERVAL_MS);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(timer);
+    };
+  }, [
+    acceptedDropoffPoint,
+    acceptedRequest,
+    bookingPhase,
+    role,
+    selectedDestination,
+    tripStatus
+  ]);
 
   useEffect(() => {
     if (!passengerPickedUpAt && pingCooldownSeconds <= 0) {
@@ -2288,9 +2617,13 @@ const MapWorkspace = ({ role }) => {
     }
 
     try {
+      const passengerTripKm = await estimateRouteDistanceKm(
+        location,
+        selectedPassengerDestination,
+        distanceBetweenMeters(location, selectedPassengerDestination) / 1000
+      );
       const paymentBreakdown = calculatePaymentBreakdown({
-        passengerTripKm: 2,
-        pickupDetourKm: 0,
+        passengerTripKm,
         seatsRequested: requestedSeats
       });
       let bookingId = null;
@@ -2327,6 +2660,11 @@ const MapWorkspace = ({ role }) => {
           dropoff: selectedPassengerDestination.label,
           seats: Number(requestedSeats),
           status: 'pending',
+          paymentAmount: paymentBreakdown.total,
+          passengerTripKm: paymentBreakdown.passengerTripKm,
+          pickupDetourKm: paymentBreakdown.pickupDetourKm,
+          paymentBaseAmount: paymentBreakdown.baseAmount,
+          paymentDetourAmount: paymentBreakdown.detourAmount,
           createdAt: new Date().toISOString()
         },
         ...currentRequests
@@ -2573,6 +2911,11 @@ const MapWorkspace = ({ role }) => {
   const handleArrival = useCallback(() => {
     const playDestinationReachedSound = prepareDestinationReachedSound();
     playDestinationReachedSound();
+
+    if (activeTripId) {
+      api.patch(`/trips/${activeTripId}/status`, { tripStatus: 'completed' }).catch(() => {});
+    }
+
     setTripStatus('arrived');
     setRouteSummary(null);
     setRouteError('');
@@ -2606,7 +2949,31 @@ const MapWorkspace = ({ role }) => {
       setPassengerPickedUpAt(null);
       setPingCooldownUntil(0);
     }, 2200);
-  }, []);
+  }, [activeTripId]);
+
+  useEffect(() => {
+    if (
+      role !== 'driver' ||
+      tripStatus !== 'active' ||
+      !selectedDestination ||
+      acceptedRequest ||
+      !mainDestinationLegReady ||
+      !Number.isFinite(destinationDistanceMeters) ||
+      destinationDistanceMeters > DESTINATION_ARRIVAL_METERS
+    ) {
+      return;
+    }
+
+    handleArrival();
+  }, [
+    acceptedRequest,
+    destinationDistanceMeters,
+    handleArrival,
+    mainDestinationLegReady,
+    role,
+    selectedDestination,
+    tripStatus
+  ]);
 
   const handleRejectRequest = (requestId) => {
     const rejectedRequest = pendingRequests.find((request) => request.id === requestId);
@@ -2676,6 +3043,10 @@ const MapWorkspace = ({ role }) => {
     }
 
     setBookingPhase('riding');
+    setPickupRoutePath([]);
+    setPickupRouteSummary(null);
+    setPickupRouteStatus('idle');
+    setPickupRouteError('');
     setAcceptedRequest((currentRequest) =>
       currentRequest
         ? {
@@ -2714,6 +3085,11 @@ const MapWorkspace = ({ role }) => {
           }
         : currentRequest
     );
+    logPaymentCalculation({
+      booking: acceptedRequest,
+      surface: 'driver payment option',
+      loggedKeys: loggedPaymentOptionsRef.current
+    });
     setPassengerPingStatus(`Payment pending for booking #${acceptedRequest.bookingId}.`);
   };
 
@@ -2805,19 +3181,39 @@ const MapWorkspace = ({ role }) => {
     }
 
     const pickupPoint = getRequestPoint(location, request);
+    const parsedDropoff = extractCoordinates(request.dropoff);
+    const passengerDropoffPoint =
+      hasPointCoordinates({ lat: request.dropoffLat, lng: request.dropoffLng })
+        ? {
+            lat: Number(request.dropoffLat),
+            lng: Number(request.dropoffLng)
+          }
+        : parsedDropoff ?? selectedDestination;
 
     setPickupRouteStatus('routing');
     setPickupRouteSummary(null);
     setPickupRouteError('');
 
     try {
+      const passengerTripKm = await estimateRouteDistanceKm(
+        pickupPoint,
+        passengerDropoffPoint,
+        distanceBetweenMeters(pickupPoint, passengerDropoffPoint) / 1000
+      );
       const paymentBreakdown = calculatePaymentBreakdown({
-        passengerTripKm: parseKm(routeSummary?.distance, 2),
-        pickupDetourKm: parseKm(request.distance, 0),
+        passengerTripKm,
         seatsRequested: request.seats
       });
       const bookingPayload = request.bookingId
-        ? await api.patch(`/bookings/${request.bookingId}/status`, { bookingStatus: 'accepted' })
+        ? await api.patch(`/bookings/${request.bookingId}/status`, {
+            bookingStatus: 'accepted',
+            paymentAmount: paymentBreakdown.total,
+            passengerTripKm: paymentBreakdown.passengerTripKm,
+            pickupDetourKm: paymentBreakdown.pickupDetourKm,
+            paymentBaseAmount: paymentBreakdown.baseAmount.toFixed(2),
+            paymentDetourAmount: paymentBreakdown.detourAmount.toFixed(2),
+            paymentMethod: 'cash'
+          })
         : await api.post('/bookings/driver-accepted', {
             tripId: activeTripId,
             requestId: request.id,
@@ -2827,6 +3223,8 @@ const MapWorkspace = ({ role }) => {
             pickupLat: pickupPoint.lat,
             pickupLng: pickupPoint.lng,
             dropoffLocation: request.dropoff,
+            dropoffLat: passengerDropoffPoint?.lat ?? null,
+            dropoffLng: passengerDropoffPoint?.lng ?? null,
             paymentAmount: paymentBreakdown.total,
             passengerTripKm: paymentBreakdown.passengerTripKm,
             pickupDetourKm: paymentBreakdown.pickupDetourKm,
@@ -2841,9 +3239,13 @@ const MapWorkspace = ({ role }) => {
         bookingId: request.bookingId ?? bookingPayload.booking.booking_id,
         passengerId: request.passengerId ?? bookingPayload.booking.passenger_id,
         status: 'accepted',
-        dropoffLat: request.dropoffLat ?? bookingPayload.booking?.dropoff_lat ?? null,
-        dropoffLng: request.dropoffLng ?? bookingPayload.booking?.dropoff_lng ?? null,
-        paymentAmount: Number(request.paymentAmount ?? bookingPayload.booking?.payment_amount ?? paymentBreakdown.total).toFixed(2)
+        dropoffLat: request.dropoffLat ?? bookingPayload.booking?.dropoff_lat ?? passengerDropoffPoint?.lat ?? null,
+        dropoffLng: request.dropoffLng ?? bookingPayload.booking?.dropoff_lng ?? passengerDropoffPoint?.lng ?? null,
+        paymentAmount: Number(paymentBreakdown.total).toFixed(2),
+        passengerTripKm: paymentBreakdown.passengerTripKm,
+        pickupDetourKm: paymentBreakdown.pickupDetourKm,
+        paymentBaseAmount: paymentBreakdown.baseAmount,
+        paymentDetourAmount: paymentBreakdown.detourAmount
       };
       setAcceptedRequest(nextRequest);
       pendingRequests
@@ -3000,13 +3402,14 @@ const MapWorkspace = ({ role }) => {
 
       <section className="map-stage">
         <GoogleMapView
-          location={location}
+          location={mapLocation}
           drivers={mapDrivers}
           selectedDriver={selectedDriver}
           onSelectDriver={role === 'passenger' ? handlePassengerDriverSelect : setSelectedDriver}
           destination={role === 'driver' ? selectedDestination : selectedPassengerDestination}
+          passengerDropoffMarkers={passengerDropoffMarkers}
           routePath={routePath}
-          pickupRoutePath={pickupRoutePath}
+          pickupRoutePath={passengerOnBoard ? [] : pickupRoutePath}
           passengerRequests={passengerRequestMarkers}
           onAcceptPassengerRequest={handleAcceptRequest}
           onRejectPassengerRequest={handleRejectRequest}
@@ -3014,6 +3417,7 @@ const MapWorkspace = ({ role }) => {
           onMapClick={handleMapClick}
           driverTripActive={role === 'driver' && tripStatus === 'active'}
           driverHeading={driverHeading}
+          hideCurrentLocationMarker={passengerOnBoard}
           focusOnDriver={role === 'driver' && tripStatus === 'active'}
           recenterSignal={recenterSignal}
         />
@@ -3022,7 +3426,7 @@ const MapWorkspace = ({ role }) => {
           <div>
             <strong>{status === 'ready' ? 'Live location ready' : 'Interactive map ready'}</strong>
             <span>
-              {error || `Lat ${location.lat.toFixed(4)}, Lng ${location.lng.toFixed(4)}`}
+              {error || `Lat ${mapLocation.lat.toFixed(4)}, Lng ${mapLocation.lng.toFixed(4)}`}
             </span>
           </div>
           <button type="button" className="ghost-button small-button" onClick={handleRelocate}>

@@ -2,6 +2,11 @@ import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
+const formatMapCoordinates = (point) =>
+  Number.isFinite(Number(point?.lat)) && Number.isFinite(Number(point?.lng))
+    ? `Lat ${Number(point.lat).toFixed(5)}, Lng ${Number(point.lng).toFixed(5)}`
+    : 'Lat/Lng unavailable';
+
 const createCarIcon = (selected = false) =>
   L.divIcon({
     className: selected ? 'leaflet-car-marker selected' : 'leaflet-car-marker',
@@ -58,12 +63,21 @@ const destinationIcon = L.divIcon({
   popupAnchor: [0, -62]
 });
 
+const passengerDropoffIcon = L.divIcon({
+  className: 'leaflet-passenger-dropoff-marker',
+  html: '<span></span>',
+  iconSize: [52, 64],
+  iconAnchor: [26, 64],
+  popupAnchor: [0, -62]
+});
+
 const GoogleMapView = ({
   location,
   drivers,
   selectedDriver,
   onSelectDriver,
   destination,
+  passengerDropoffMarkers = [],
   routePath,
   pickupRoutePath = [],
   passengerRequests = [],
@@ -73,6 +87,7 @@ const GoogleMapView = ({
   onMapClick,
   driverTripActive,
   driverHeading = 0,
+  hideCurrentLocationMarker = false,
   focusOnDriver = false,
   recenterSignal = 0
 }) => {
@@ -157,11 +172,12 @@ const GoogleMapView = ({
       L.marker([location.lat, location.lng], {
         icon: createDriverCarIcon(driverHeading),
         keyboard: false,
-        title: 'Your car'
+        title: 'Your car',
+        zIndexOffset: 700
       })
-        .bindPopup('Your car is on the active trip route')
+        .bindPopup(`Your car is on the active trip route<br /><small>${formatMapCoordinates(location)}</small>`)
         .addTo(markerLayer);
-    } else {
+    } else if (!hideCurrentLocationMarker) {
       L.marker([location.lat, location.lng], {
         icon: currentLocationIcon,
         keyboard: false,
@@ -200,13 +216,15 @@ const GoogleMapView = ({
       const marker = L.marker([request.lat, request.lng], {
         icon: createPassengerRequestIcon(request.selected),
         keyboard: false,
-        title: request.pickup
+        title: request.pickup,
+        zIndexOffset: request.selected ? 1000 : 500
       })
         .bindPopup(`
           <div class="map-request-popup">
             <strong>${request.passenger}</strong>
             <span>${request.pickup} to ${request.dropoff}</span>
             <small>${request.seats} ${request.seats === 1 ? 'seat' : 'seats'} requested</small>
+            <small>${request.markerNote ?? formatMapCoordinates(request)}</small>
             ${
               request.selected
                 ? ''
@@ -232,12 +250,34 @@ const GoogleMapView = ({
       marker.addTo(markerLayer);
     });
 
+    passengerDropoffMarkers.forEach((dropoff) => {
+      if (!Number.isFinite(Number(dropoff.lat)) || !Number.isFinite(Number(dropoff.lng))) {
+        return;
+      }
+
+      L.marker([dropoff.lat, dropoff.lng], {
+        icon: passengerDropoffIcon,
+        keyboard: false,
+        title: dropoff.label,
+        zIndexOffset: 650
+      })
+        .bindPopup(`
+          <div class="map-request-popup">
+            <strong>${dropoff.passenger}</strong>
+            <span>Passenger drop-off</span>
+            <small>${dropoff.label}</small>
+            <small>${formatMapCoordinates(dropoff)}</small>
+          </div>
+        `)
+        .addTo(markerLayer);
+    });
+
     if (destination) {
       L.marker([destination.lat, destination.lng], {
         icon: destinationIcon,
         title: destination.label
       })
-        .bindPopup(`<strong>Destination</strong><br />${destination.label}`)
+        .bindPopup(`<strong>Destination</strong><br />${destination.label}<br /><small>${formatMapCoordinates(destination)}</small>`)
         .addTo(markerLayer);
     }
   }, [
@@ -245,7 +285,9 @@ const GoogleMapView = ({
     driverHeading,
     driverTripActive,
     drivers,
+    hideCurrentLocationMarker,
     location,
+    passengerDropoffMarkers,
     passengerRequests,
     selectedDriver
   ]);

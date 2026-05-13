@@ -1204,6 +1204,38 @@ textarea {
   border-radius: 50%;
 }
 
+.leaflet-passenger-dropoff-marker {
+  position: relative;
+}
+
+.leaflet-passenger-dropoff-marker span {
+  position: absolute;
+  left: 8px;
+  top: 0;
+  width: 36px;
+  height: 36px;
+  display: block;
+  background: #0f766e;
+  border: 4px solid #ffffff;
+  border-radius: 50% 50% 50% 0;
+  box-shadow: 0 8px 16px rgba(23, 32, 38, 0.26);
+  transform: rotate(-45deg);
+}
+
+.leaflet-passenger-dropoff-marker span::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: 4px solid #5eead4;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
 .leaflet-container.placing-marker {
   cursor: crosshair;
 }
@@ -1368,9 +1400,14 @@ textarea {
 }
 
 .suggestion-item span,
+.suggestion-item small,
 .suggestion-note {
   color: var(--ink-muted);
   font-size: 0.84rem;
+}
+
+.suggestion-item small {
+  font-size: 0.76rem;
 }
 
 .suggestion-note {
@@ -1459,9 +1496,14 @@ textarea {
 }
 
 .selected-place span,
+.selected-place small,
 .route-summary span {
   color: var(--ink-muted);
   font-size: 0.86rem;
+}
+
+.selected-place small {
+  font-size: 0.78rem;
 }
 
 .route-summary {
