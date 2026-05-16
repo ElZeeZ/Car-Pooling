@@ -74,9 +74,3 @@ The Routely API is scaffolded in layers so each requirement can be maintained wi
 - `services/` contains business logic such as authentication.
 - `models/` contains database access helpers.
 - `middleware/` contains auth, error, and 404 handling.
-
-## Database Notes
-
-The current ERD uses separate `drivers`, `passengers`, `driver_vehicles`, `trips`, `bookings`, `messages`, `reports`, wallet, and card tables. Booking payment fields stay on `bookings`; driver ratings are stored on completed bookings and averaged into the driver record. Admin access is handled by backend configuration instead of a database table.
-
-The default local database name is still `carpooling_db` for compatibility with the existing setup scripts and `.env` examples.
