@@ -1,8 +1,8 @@
 {
-  "name": "carpooling-system",
+  "name": "routely",
   "version": "0.1.0",
   "private": true,
-  "description": "Full-stack backbone for the Smart Carpooling web application.",
+  "description": "Full-stack backbone for the Routely web application.",
   "workspaces": [
     "client",
     "server"

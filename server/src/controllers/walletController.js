@@ -17,7 +17,11 @@ const ownerFromUser = (user) => {
 
 const detectCardBrand = () => 'Card';
 
-const normalizeCardNumber = (value) => String(value ?? '').replace(/\D/g, '');
+const CARD_NUMBER_PATTERN = /^\d{13,19}$/;
+const CARDHOLDER_NAME_PATTERN = /^[\p{L}](?:[\p{L}\s'.-]{0,118}[\p{L}])?$/u;
+
+const normalizeCardholderName = (value) => String(value ?? '').trim().replace(/\s+/g, ' ');
+const normalizeCardNumber = (value) => String(value ?? '').replace(/\s+/g, '');
 
 const hashCardNumber = (value) =>
   crypto
@@ -77,19 +81,32 @@ export const getWallet = asyncHandler(async (req, res) => {
 export const addPaymentCard = asyncHandler(async (req, res) => {
   const owner = ownerFromUser(req.user);
   const { cardholderName, cardNumber, expiryMonth, expiryYear } = req.body;
+  const normalizedCardholderName = normalizeCardholderName(cardholderName);
   const normalizedCard = normalizeCardNumber(cardNumber);
 
-  if (!cardholderName || !normalizedCard || !expiryMonth || !expiryYear) {
+  if (!normalizedCardholderName || !normalizedCard || !expiryMonth || !expiryYear) {
     throw new HttpError(400, 'Cardholder name, demo card number, expiry month, and expiry year are required.');
+  }
+
+  if (!CARDHOLDER_NAME_PATTERN.test(normalizedCardholderName)) {
+    throw new HttpError(400, 'Cardholder name must contain letters, spaces, apostrophes, periods, or hyphens only.');
+  }
+
+  if (!CARD_NUMBER_PATTERN.test(normalizedCard)) {
+    throw new HttpError(400, 'Card number must contain 13 to 19 digits only.');
   }
 
   const expiryMonthNumber = Number(expiryMonth);
   const expiryYearNumber = Number(expiryYear);
+  const expiryMonthIsDigits = /^\d{1,2}$/.test(String(expiryMonth));
+  const expiryYearIsDigits = /^\d{4}$/.test(String(expiryYear));
 
   if (
+    !expiryMonthIsDigits ||
     !Number.isInteger(expiryMonthNumber) ||
     expiryMonthNumber < 1 ||
     expiryMonthNumber > 12 ||
+    !expiryYearIsDigits ||
     !Number.isInteger(expiryYearNumber) ||
     expiryYearNumber < new Date().getFullYear()
   ) {
@@ -105,7 +122,7 @@ export const addPaymentCard = asyncHandler(async (req, res) => {
     [
       owner.ownerType,
       owner.ownerId,
-      cardholderName,
+      normalizedCardholderName,
       detectCardBrand(normalizedCard),
       normalizedCard.slice(-4),
       hashCardNumber(normalizedCard),

@@ -1,13 +1,13 @@
-﻿# Smart Carpooling Web-Based System
+# Routely
 
-This repository is a full prototype for the carpooling web app described in the SRS and project proposal. It is organized as a simple React frontend, Node.js + Express backend, and MySQL database schema that can be imported through HeidiSQL.
+Routely is a full-stack carpooling web app prototype for passengers, drivers, and administrators. It is organized as a React frontend, Node.js + Express backend, and MySQL/MariaDB schema that can be imported through HeidiSQL.
 
 ## Project Structure
 
 ```text
 client/      React app with role-based pages, maps, wallet, and API helpers
 server/      Express API with routes, controllers, services, models, and middleware
-database/    MySQL schema plus a saved inspection query
+database/    MySQL/MariaDB schema plus local setup helpers
 docs/        Project proposal and SRS documents
 ```
 
@@ -45,7 +45,7 @@ The default ports are:
 
 ## Server Setup With Tailscale
 
-For testing the app from multiple devices, install and sign in to [Tailscale](https://tailscale.com/) on the computer running the project and on any device that needs access.
+For testing Routely from multiple devices, install and sign in to [Tailscale](https://tailscale.com/) on the computer running the project and on any device that needs access.
 
 Run:
 
@@ -67,7 +67,7 @@ If the frontend port is changed, set `VITE_DEV_PORT` in `client/.env` or in the 
 
 ## Backend Notes
 
-The API is intentionally scaffolded in layers so each requirement can be filled in later without reshaping the repo:
+The Routely API is scaffolded in layers so each requirement can be maintained without reshaping the repo:
 
 - `routes/` defines REST endpoints.
 - `controllers/` handles HTTP request/response behavior.
@@ -77,6 +77,6 @@ The API is intentionally scaffolded in layers so each requirement can be filled 
 
 ## Database Notes
 
-The SRS ERD uses separate `drivers`, `passengers`, `trips`, `bookings`, `messages`, and `reports` tables, with wallet/card support added for local payment testing. Booking payment fields stay on `bookings`; driver ratings are stored on completed bookings and averaged into the driver record. Admin access is handled by backend configuration instead of a database table.
+The current ERD uses separate `drivers`, `passengers`, `driver_vehicles`, `trips`, `bookings`, `messages`, `reports`, wallet, and card tables. Booking payment fields stay on `bookings`; driver ratings are stored on completed bookings and averaged into the driver record. Admin access is handled by backend configuration instead of a database table.
 
-
+The default local database name is still `carpooling_db` for compatibility with the existing setup scripts and `.env` examples.

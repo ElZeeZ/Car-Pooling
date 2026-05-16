@@ -127,7 +127,7 @@ const startProcess = (name, commandLine, env = {}) => {
 
 const printUrls = ({ dnsName, tailscaleIp }) => {
   console.log('');
-  console.log('Smart Carpooling VPN dev is ready.');
+  console.log('Routely VPN dev is ready.');
 
   if (dnsName) {
     console.log('');

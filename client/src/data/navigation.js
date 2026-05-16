@@ -13,7 +13,8 @@ export const navigationByRole = {
     { label: 'Bookings', path: '/bookings' },
     { label: 'Messages', path: '/messages' },
     { label: 'Wallet', path: '/wallet' },
-    { label: 'Reports', path: '/reports' }
+    { label: 'Reports', path: '/reports' },
+    { label: 'Account', path: '/account' }
   ],
   driver: [
     { label: 'Map', path: '/driver' },
@@ -21,7 +22,8 @@ export const navigationByRole = {
     { label: 'Bookings', path: '/bookings' },
     { label: 'Messages', path: '/messages' },
     { label: 'Wallet', path: '/wallet' },
-    { label: 'Reports', path: '/reports' }
+    { label: 'Reports', path: '/reports' },
+    { label: 'Account', path: '/account' }
   ],
   admin: [
     { label: 'Dashboard', path: '/admin' },

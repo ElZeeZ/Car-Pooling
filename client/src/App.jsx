@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import AppLayout from './layouts/AppLayout.jsx';
+import AccountPage from './pages/AccountPage.jsx';
 import AdminDashboard from './pages/AdminDashboard.jsx';
 import BookingsPage from './pages/BookingsPage.jsx';
 import DashboardRedirect from './pages/DashboardRedirect.jsx';
@@ -43,6 +44,10 @@ const App = () => (
         <Route path="/messages" element={<MessagesPage />} />
         <Route path="/wallet" element={<WalletPage />} />
         <Route path="/reports" element={<ReportsPage />} />
+
+        <Route element={<ProtectedRoute roles={['passenger', 'driver']} />}>
+          <Route path="/account" element={<AccountPage />} />
+        </Route>
       </Route>
     </Route>
 

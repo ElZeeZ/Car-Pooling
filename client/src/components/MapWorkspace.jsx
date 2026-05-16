@@ -2,16 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/http.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { incomingRequests, nearbyDrivers } from '../data/mapDemoData.js';
+import { incomingRequests } from '../data/mapDemoData.js';
 import { useDeviceLocation } from '../hooks/useDeviceLocation.js';
 import GoogleMapView from './GoogleMapView.jsx';
+import ImageCropModal from './ImageCropModal.jsx';
 
 const toolbarLinks = [
   { label: 'Trips', path: '/trips' },
   { label: 'Bookings', path: '/bookings' },
   { label: 'Messages', path: '/messages' },
   { label: 'Wallet', path: '/wallet' },
-  { label: 'Reports', path: '/reports' }
+  { label: 'Reports', path: '/reports' },
+  { label: 'Account', path: '/account' }
 ];
 
 const LEBANON_SEARCH_VIEWBOX = '35.09,34.70,36.70,33.00';
@@ -113,6 +115,51 @@ const prepareCancelSound = () => prepareSoundSequence([392, 311.13, 246.94], 0.0
 
 const formatSeatCount = (count) => `${count} ${Number(count) === 1 ? 'seat' : 'seats'}`;
 
+const formatDateForAccountInput = (value) => {
+  if (!value) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value.slice(0, 10);
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+};
+
+const formatMapLink = (point) =>
+  hasPointCoordinates(point)
+    ? `https://www.google.com/maps?q=${Number(point.lat).toFixed(6)},${Number(point.lng).toFixed(6)}`
+    : 'Location unavailable';
+
+const copyTextToClipboard = async (text) => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  textarea.remove();
+};
+
+const parseRating = (value) => {
+  const rating = Number(value);
+  return Number.isFinite(rating) && rating > 0 ? Math.min(rating, 5) : null;
+};
+
+const formatRatingText = (value) => {
+  const rating = parseRating(value);
+  return rating === null ? 'N/A' : rating.toFixed(1);
+};
+
 const clampSeatValue = (value, maxSeats = MAX_PASSENGER_SEATS) => {
   const parsedValue = Number(value);
   const parsedMax = Number(maxSeats);
@@ -159,14 +206,17 @@ const tripToPassengerDriver = (trip, fallbackLocation) => {
   const destinationLat = numberOrNull(trip.destination_lat) ?? parsedDestination?.lat ?? null;
   const destinationLng = numberOrNull(trip.destination_lng) ?? parsedDestination?.lng ?? null;
   const seats = Number(trip.remaining_seats ?? trip.available_seats ?? 0);
-  const ratingAverage = Number(trip.rating_average ?? 4.8);
+  const ratingAverage = parseRating(trip.rating_average);
 
   return {
     id: `trip-${trip.trip_id}`,
     tripId: trip.trip_id,
     driverId: trip.driver_id,
     name: trip.driver_name,
-    rating: Number.isFinite(ratingAverage) ? ratingAverage.toFixed(1) : '4.8',
+    rating: ratingAverage,
+    ratingCount: Number(trip.rating_count ?? 0),
+    profileImage: trip.profile_image ?? '',
+    licenseNumber: trip.license_number ?? 'N/A',
     seats,
     vehicle: trip.vehicle_info ?? 'Registered vehicle',
     route: `${trip.origin} to ${trip.destination}`,
@@ -223,7 +273,7 @@ const bookingToDriverRequest = (booking, fallbackLocation) => {
 const bookingToPassengerRequest = (booking) => {
   const driverLat = numberOrNull(booking.driver_current_lat);
   const driverLng = numberOrNull(booking.driver_current_lng);
-  const ratingAverage = Number(booking.rating_average ?? 4.8);
+  const ratingAverage = parseRating(booking.rating_average);
 
   return {
     localId: `booking-${booking.booking_id}`,
@@ -250,7 +300,10 @@ const bookingToPassengerRequest = (booking) => {
       id: `trip-${booking.trip_id}`,
       tripId: booking.trip_id,
       name: booking.driver_name,
-      rating: Number.isFinite(ratingAverage) ? ratingAverage.toFixed(1) : '4.8',
+      rating: ratingAverage,
+      ratingCount: Number(booking.rating_count ?? 0),
+      profileImage: booking.profile_image ?? '',
+      licenseNumber: booking.license_number ?? 'N/A',
       seats: Number(booking.seats_requested ?? 1),
       vehicle: booking.vehicle_info ?? 'Registered vehicle',
       route: `${booking.origin} to ${booking.destination}`,
@@ -289,6 +342,122 @@ const calculateBearing = (origin, destination) => {
   return (toDegrees(Math.atan2(y, x)) + 360) % 360;
 };
 
+const DriverAvatar = ({ src, name, size = 'medium' }) => (
+  <span className={`driver-avatar ${size}`}>
+    {src ? <img src={src} alt={`${name ?? 'Driver'} profile`} /> : <span className="avatar-icon" aria-hidden="true" />}
+  </span>
+);
+
+const RatingStars = ({ rating }) => {
+  const numericRating = parseRating(rating);
+
+  if (numericRating === null) {
+    return <span className="rating-stars empty" aria-label="No ratings yet" />;
+  }
+
+  const roundedRating = Math.round(numericRating * 2) / 2;
+  const fullStars = Math.floor(roundedRating);
+  const hasHalfStar = roundedRating % 1 !== 0;
+
+  return (
+    <span className="rating-stars" aria-label={`${numericRating.toFixed(1)} out of 5 stars`}>
+      {Array.from({ length: fullStars }, (_, index) => (
+        <span className="rating-star full" aria-hidden="true" key={`full-${index}`}>
+          &#9733;
+        </span>
+      ))}
+      {hasHalfStar ? (
+        <span className="rating-star half" aria-hidden="true">
+          &#9733;
+        </span>
+      ) : null}
+    </span>
+  );
+};
+
+const RatingDisplay = ({ rating, count }) => (
+  <span className="rating-display">
+    <strong>{formatRatingText(rating)}</strong>
+    <RatingStars rating={rating} />
+    {Number(count) > 0 ? <small>{Number(count)} ratings</small> : <small>No ratings yet</small>}
+  </span>
+);
+
+const StarRatingInput = ({ value, onChange, disabled }) => {
+  const selectedRating = Number(value);
+
+  return (
+    <div className="star-rating-input" aria-label="Driver rating">
+      {[1, 2, 3, 4, 5].map((rating) => (
+        <button
+          type="button"
+          key={rating}
+          className={selectedRating >= rating ? 'active' : ''}
+          onClick={() => onChange(String(rating))}
+          disabled={disabled}
+          aria-label={`Rate ${rating} out of 5`}
+          aria-pressed={selectedRating >= rating}
+        >
+          ★
+        </button>
+      ))}
+      {selectedRating ? (
+        <button
+          type="button"
+          className="clear-rating"
+          onClick={() => onChange('')}
+          disabled={disabled}
+        >
+          Clear
+        </button>
+      ) : null}
+    </div>
+  );
+};
+
+const SelectedDriverCard = ({ driver, canRequest, hasPendingRequest, onRequestBooking, requestStatus }) => (
+  <aside className="selected-driver-popover">
+    <DriverAvatar src={driver.profileImage} name={driver.name} size="large" />
+    <div className="selected-driver-summary">
+      <p className="eyebrow">Selected driver</p>
+      <h3>{driver.name}</h3>
+      <RatingDisplay rating={driver.rating} count={driver.ratingCount} />
+    </div>
+    <dl>
+      <div>
+        <dt>Vehicle</dt>
+        <dd>{driver.vehicle}</dd>
+      </div>
+      <div>
+        <dt>Plate</dt>
+        <dd>{driver.licenseNumber}</dd>
+      </div>
+      <div>
+        <dt>Route</dt>
+        <dd>{driver.route}</dd>
+      </div>
+      <div>
+        <dt>Seats</dt>
+        <dd>{formatSeatCount(driver.seats)}</dd>
+      </div>
+      <div>
+        <dt>Location</dt>
+        <dd>{formatPointCoordinates(driver)}</dd>
+      </div>
+      {driver.destinationLabel ? (
+        <div>
+          <dt>Destination</dt>
+          <dd>{driver.destinationLabel}</dd>
+        </div>
+      ) : null}
+    </dl>
+    <button type="button" className="primary-button" disabled={!canRequest} onClick={onRequestBooking}>
+      {hasPendingRequest ? 'Request sent' : 'Request this driver'}
+    </button>
+    {requestStatus ? <small className="action-hint">{requestStatus}</small> : null}
+  </aside>
+);
+
 const PassengerPanel = ({
   destinationQuery,
   onDestinationQueryChange,
@@ -315,7 +484,9 @@ const PassengerPanel = ({
   onDriverRatingChange,
   onPayBooking,
   paymentSubmitting,
-  requestStatus
+  requestStatus,
+  onCopySafetyDetails,
+  safetyCopyStatus
 }) => (
   <aside className="map-side-panel">
     <div>
@@ -421,18 +592,11 @@ const PassengerPanel = ({
             <strong>Payment due: ${activeBooking.paymentAmount}</strong>
             <label>
               Driver rating (optional)
-              <select
+              <StarRatingInput
                 value={driverRating}
-                onChange={(event) => onDriverRatingChange(event.target.value)}
+                onChange={onDriverRatingChange}
                 disabled={paymentSubmitting || activeBooking.paymentStatus === 'cash_pending'}
-              >
-                <option value="">No rating</option>
-                {[1, 2, 3, 4, 5].map((rating) => (
-                  <option value={rating} key={rating}>
-                    {rating} {rating === 1 ? 'star' : 'stars'}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <label>
               Payment method
@@ -464,6 +628,15 @@ const PassengerPanel = ({
             {requestStatus || 'Your booking is locked in. Stay on this trip until the driver cancels or the ride is completed.'}
           </p>
         )}
+
+        {['picked_up', 'payment_due'].includes(activeBooking.status) ? (
+          <div className="safety-copy-box">
+            <button type="button" className="ghost-button" onClick={() => onCopySafetyDetails(activeBooking)}>
+              Copy safety details
+            </button>
+            {safetyCopyStatus ? <small className="action-hint">{safetyCopyStatus}</small> : null}
+          </div>
+        ) : null}
       </div>
     ) : (
       <>
@@ -477,9 +650,12 @@ const PassengerPanel = ({
             className={`driver-card ${selectedDriver?.id === driver.id ? 'selected' : ''}`}
             onClick={() => onSelectDriver(driver)}
           >
-            <strong>{driver.name}</strong>
+            <span className="driver-card-heading">
+              <strong>{driver.name}</strong>
+              <RatingDisplay rating={driver.rating} count={driver.ratingCount} />
+            </span>
             <span>{driver.route}</span>
-            <small>{driver.eta} away, {formatSeatCount(driver.seats)}, {driver.rating} rating</small>
+            <small>{driver.eta} away, {formatSeatCount(driver.seats)}</small>
           </button>
         )) : (
           <p className="empty-state compact">No nearby drivers have enough available seats.</p>
@@ -534,12 +710,17 @@ const DriverPanel = ({
   routeError,
   pendingRequests,
   acceptedRequest,
+  selectedRequestId,
+  requestPreviewSummary,
+  requestPreviewStatus,
+  requestPreviewError,
   passengerPingStatus,
   pickupRouteSummary,
   pickupRouteStatus,
   pickupRouteError,
   onAcceptRequest,
   onRejectRequest,
+  onSelectRequest,
   onCancelBooking,
   onPickupPassenger,
   onPassengerDropoff,
@@ -765,13 +946,33 @@ const DriverPanel = ({
         <div className="request-list">
           {pendingRequests.length > 0 ? (
             pendingRequests.map((request) => (
-              <article className="request-card" key={request.id}>
+              <article
+                className={`request-card ${selectedRequestId === request.id ? 'selected' : ''}`}
+                key={request.id}
+              >
                 <div>
                   <strong>{request.passenger}</strong>
                   <span>{request.pickup} to {request.dropoff}</span>
-                  <small>{request.distance}, {formatSeatCount(request.seats)} requested</small>
+                  <small>
+                    {selectedRequestId === request.id && requestPreviewStatus === 'routing'
+                      ? 'Loading path to passenger...'
+                      : selectedRequestId === request.id && requestPreviewSummary
+                        ? `${requestPreviewSummary.distance} km to passenger, about ${requestPreviewSummary.duration} min`
+                        : `${request.distance}, ${formatSeatCount(request.seats)} requested`}
+                  </small>
                 </div>
+                {selectedRequestId === request.id && requestPreviewError ? (
+                  <p className="inline-error">{requestPreviewError}</p>
+                ) : null}
                 <div className="button-row">
+                  <button
+                    type="button"
+                    className="ghost-button small-button"
+                    onClick={() => onSelectRequest(request)}
+                    disabled={requestPreviewStatus === 'routing' && selectedRequestId === request.id}
+                  >
+                    {selectedRequestId === request.id ? 'Path shown' : 'Show path'}
+                  </button>
                   <button
                     type="button"
                     className="primary-button small-button"
@@ -1165,9 +1366,10 @@ const estimateRouteDistanceKm = async (origin, destination, fallbackKm = 0) => {
 
 const MapWorkspace = ({ role }) => {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, updateAccountProfile } = useAuth();
   const { location, status, error, refreshLocation } = useDeviceLocation();
   const latestLocationRef = useRef(location);
+  const toolbarImageInputRef = useRef(null);
   const lastDriverLocationPushRef = useRef({
     tripId: null,
     location: null,
@@ -1235,6 +1437,7 @@ const MapWorkspace = ({ role }) => {
     () => initialPassengerWorkspace?.passengerDriverRating ?? ''
   );
   const [passengerPaymentSubmitting, setPassengerPaymentSubmitting] = useState(false);
+  const [passengerSafetyCopyStatus, setPassengerSafetyCopyStatus] = useState('');
   const [recenterSignal, setRecenterSignal] = useState(0);
   const hasAutoRelocatedRef = useRef(false);
   const [destinationQuery, setDestinationQuery] = useState(() => initialDriverWorkspace?.destinationQuery ?? '');
@@ -1257,6 +1460,11 @@ const MapWorkspace = ({ role }) => {
   const [driverRouteLeg, setDriverRouteLeg] = useState({ phase: '', targetKey: '' });
   const [pendingRequests, setPendingRequests] = useState(() => initialDriverWorkspace?.pendingRequests ?? []);
   const pendingRequestsRef = useRef(pendingRequests);
+  const [selectedRequestId, setSelectedRequestId] = useState(null);
+  const [requestPreviewRoutePath, setRequestPreviewRoutePath] = useState([]);
+  const [requestPreviewSummary, setRequestPreviewSummary] = useState(null);
+  const [requestPreviewStatus, setRequestPreviewStatus] = useState('idle');
+  const [requestPreviewError, setRequestPreviewError] = useState('');
   const [acceptedRequest, setAcceptedRequest] = useState(() => initialDriverWorkspace?.acceptedRequest ?? null);
   const [bookingPhase, setBookingPhase] = useState(() => initialDriverWorkspace?.bookingPhase ?? 'idle');
   const [passengerPingStatus, setPassengerPingStatus] = useState(() => initialDriverWorkspace?.passengerPingStatus ?? '');
@@ -1276,6 +1484,16 @@ const MapWorkspace = ({ role }) => {
   const [pingCooldownUntil, setPingCooldownUntil] = useState(0);
   const [cooldownTick, setCooldownTick] = useState(0);
   const [passengerPickedUpAt, setPassengerPickedUpAt] = useState(() => initialDriverWorkspace?.passengerPickedUpAt ?? null);
+  const [toolbarImageFile, setToolbarImageFile] = useState(null);
+  const [toolbarImageStatus, setToolbarImageStatus] = useState('');
+
+  const clearRequestPreview = useCallback(() => {
+    setSelectedRequestId(null);
+    setRequestPreviewRoutePath([]);
+    setRequestPreviewSummary(null);
+    setRequestPreviewStatus('idle');
+    setRequestPreviewError('');
+  }, []);
 
   useEffect(() => {
     latestLocationRef.current = location;
@@ -1307,6 +1525,34 @@ const MapWorkspace = ({ role }) => {
   useEffect(() => {
     pendingRequestsRef.current = pendingRequests;
   }, [pendingRequests]);
+
+  useEffect(() => {
+    if (
+      role === 'driver' &&
+      selectedRequestId &&
+      !acceptedRequest &&
+      !pendingRequests.some((request) => request.id === selectedRequestId)
+    ) {
+      clearRequestPreview();
+    }
+  }, [acceptedRequest, clearRequestPreview, pendingRequests, role, selectedRequestId]);
+
+  useEffect(() => {
+    if (
+      role === 'driver' &&
+      (acceptedRequest || tripStatus !== 'active') &&
+      (selectedRequestId || requestPreviewRoutePath.length > 0)
+    ) {
+      clearRequestPreview();
+    }
+  }, [
+    acceptedRequest,
+    clearRequestPreview,
+    requestPreviewRoutePath.length,
+    role,
+    selectedRequestId,
+    tripStatus
+  ]);
 
   useEffect(() => {
     pickupRoutePathRef.current = pickupRoutePath;
@@ -1369,6 +1615,11 @@ const MapWorkspace = ({ role }) => {
         }
       : location;
   }, [activePassengerBooking, location]);
+
+  useEffect(() => {
+    setPassengerSafetyCopyStatus('');
+  }, [activePassengerBooking?.bookingId, activePassengerBooking?.status]);
+
   const mapLocation = passengerOnBoard ? activePassengerDriverPoint : location;
   const mapDrivers = useMemo(
     () => (role === 'passenger' ? (activePassengerBooking && selectedDriver ? [selectedDriver] : passengerDrivers) : []),
@@ -1384,9 +1635,10 @@ const MapWorkspace = ({ role }) => {
     return sourceRequests.map((request) => ({
       ...request,
       ...getRequestPoint(location, request),
-      selected: acceptedRequest?.id === request.id
+      accepted: acceptedRequest?.id === request.id,
+      selected: acceptedRequest?.id === request.id || selectedRequestId === request.id
     }));
-  }, [acceptedRequest, bookingPhase, location.lat, location.lng, pendingRequests, role]);
+  }, [acceptedRequest, bookingPhase, location.lat, location.lng, pendingRequests, role, selectedRequestId]);
   const passengerDropoffMarkers = useMemo(() => {
     if (role !== 'driver') {
       return [];
@@ -2452,6 +2704,37 @@ const MapWorkspace = ({ role }) => {
     navigate('/login');
   };
 
+  const handleToolbarImageChange = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (file) {
+      setToolbarImageFile(file);
+      setToolbarImageStatus('');
+    }
+  };
+
+  const handleToolbarImageSave = async (profileImage) => {
+    if (role !== 'driver') {
+      return;
+    }
+
+    setToolbarImageStatus('Saving picture...');
+
+    try {
+      await updateAccountProfile({
+        fullName: user?.full_name ?? '',
+        phone: user?.phone ?? '',
+        ...(user?.birth_date ? { birthDate: formatDateForAccountInput(user.birth_date) } : {}),
+        profileImage
+      });
+      setToolbarImageFile(null);
+      setToolbarImageStatus('Picture updated.');
+    } catch (requestError) {
+      setToolbarImageStatus(requestError.message);
+    }
+  };
+
   const handleRelocate = async () => {
     const playMapSound = prepareMapSound();
     playMapSound();
@@ -2742,6 +3025,48 @@ const MapWorkspace = ({ role }) => {
     }
   };
 
+  const handleCopyPassengerSafetyDetails = async (booking) => {
+    const driver = booking?.driver ?? selectedDriver ?? {};
+    const ridePoint = hasPointCoordinates(driver)
+      ? driver
+      : hasPointCoordinates(activePassengerDriverPoint)
+        ? activePassengerDriverPoint
+        : location;
+    const passengerPoint = hasPointCoordinates(location) ? location : null;
+    const lines = [
+      'Routely safety ride details',
+      `Passenger: ${user?.full_name ?? user?.email ?? 'N/A'}`,
+      `Booking: #${booking?.bookingId ?? 'N/A'}`,
+      `Ride status: ${booking?.status ?? 'N/A'}`,
+      '',
+      'Driver details',
+      `Name: ${booking?.driverName ?? driver.name ?? 'N/A'}`,
+      `Vehicle: ${driver.vehicle ?? 'N/A'}`,
+      `License plate: ${driver.licenseNumber ?? 'N/A'}`,
+      `Rating: ${formatRatingText(driver.rating)}${Number(driver.ratingCount) > 0 ? ` (${driver.ratingCount} ratings)` : ''}`,
+      '',
+      'Trip details',
+      `Route: ${booking?.route ?? driver.route ?? 'N/A'}`,
+      `Drop-off: ${booking?.dropoff ?? driver.destinationLabel ?? 'N/A'}`,
+      `Seats: ${booking?.seats ?? 'N/A'}`,
+      '',
+      `Current ride location: ${formatPointCoordinates(ridePoint)}`,
+      `Map link: ${formatMapLink(ridePoint)}`
+    ];
+
+    if (passengerPoint) {
+      lines.push('', `Passenger device location: ${formatPointCoordinates(passengerPoint)}`);
+      lines.push(`Passenger map link: ${formatMapLink(passengerPoint)}`);
+    }
+
+    try {
+      await copyTextToClipboard(lines.join('\n'));
+      setPassengerSafetyCopyStatus('Safety details copied.');
+    } catch {
+      setPassengerSafetyCopyStatus('Could not copy safety details.');
+    }
+  };
+
   const handleQuickMessageSend = async (event) => {
     event.preventDefault();
 
@@ -2975,6 +3300,35 @@ const MapWorkspace = ({ role }) => {
     tripStatus
   ]);
 
+  const handleSelectPassengerRequest = useCallback(
+    async (request) => {
+      if (role !== 'driver' || tripStatus !== 'active' || acceptedRequest) {
+        return;
+      }
+
+      const currentLocation = latestLocationRef.current;
+      const pickupPoint = getRequestPoint(currentLocation, request);
+
+      setSelectedRequestId(request.id);
+      setRequestPreviewStatus('routing');
+      setRequestPreviewSummary(null);
+      setRequestPreviewError('');
+
+      try {
+        const previewRoute = await fetchDrivingRoute(currentLocation, pickupPoint);
+        setRequestPreviewRoutePath(previewRoute.path);
+        setRequestPreviewSummary(previewRoute.summary);
+        setRequestPreviewStatus('ready');
+      } catch {
+        setRequestPreviewRoutePath(createStraightFallbackRoute(currentLocation, pickupPoint));
+        setRequestPreviewSummary(null);
+        setRequestPreviewStatus('ready');
+        setRequestPreviewError('Could not load road routing, so a direct line to this passenger is shown.');
+      }
+    },
+    [acceptedRequest, role, tripStatus]
+  );
+
   const handleRejectRequest = (requestId) => {
     const rejectedRequest = pendingRequests.find((request) => request.id === requestId);
     const playCancelSound = prepareCancelSound();
@@ -2985,6 +3339,10 @@ const MapWorkspace = ({ role }) => {
     }
 
     setPendingRequests((currentRequests) => currentRequests.filter((request) => request.id !== requestId));
+
+    if (selectedRequestId === requestId) {
+      clearRequestPreview();
+    }
 
     if (acceptedRequest?.id === requestId) {
       if (acceptedRequest.bookingId) {
@@ -3248,6 +3606,7 @@ const MapWorkspace = ({ role }) => {
         paymentDetourAmount: paymentBreakdown.detourAmount
       };
       setAcceptedRequest(nextRequest);
+      clearRequestPreview();
       pendingRequests
         .filter((pendingRequest) => pendingRequest.bookingId && pendingRequest.bookingId !== nextRequest.bookingId)
         .forEach((pendingRequest) => {
@@ -3371,8 +3730,30 @@ const MapWorkspace = ({ role }) => {
     <main className="map-workspace">
       <header className="map-toolbar">
         <div className="toolbar-welcome">
-          <span>Welcome {welcomeName}</span>
-          <small>{title}</small>
+          {role === 'driver' ? (
+            <>
+              <button
+                type="button"
+                className="avatar-button"
+                onClick={() => toolbarImageInputRef.current?.click()}
+                aria-label="Update driver profile picture"
+              >
+                <DriverAvatar src={user?.profile_image} name={welcomeName} />
+              </button>
+              <input
+                ref={toolbarImageInputRef}
+                className="visually-hidden"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleToolbarImageChange}
+              />
+            </>
+          ) : null}
+          <div>
+            <span>Welcome {welcomeName}</span>
+            <small>{toolbarImageStatus || title}</small>
+          </div>
         </div>
 
         <div className="toolbar-center">
@@ -3400,6 +3781,15 @@ const MapWorkspace = ({ role }) => {
         </nav>
       </header>
 
+      {toolbarImageFile ? (
+        <ImageCropModal
+          file={toolbarImageFile}
+          title="Adjust driver picture"
+          onCancel={() => setToolbarImageFile(null)}
+          onSave={handleToolbarImageSave}
+        />
+      ) : null}
+
       <section className="map-stage">
         <GoogleMapView
           location={mapLocation}
@@ -3410,9 +3800,11 @@ const MapWorkspace = ({ role }) => {
           passengerDropoffMarkers={passengerDropoffMarkers}
           routePath={routePath}
           pickupRoutePath={passengerOnBoard ? [] : pickupRoutePath}
+          requestPreviewRoutePath={role === 'driver' ? requestPreviewRoutePath : []}
           passengerRequests={passengerRequestMarkers}
           onAcceptPassengerRequest={handleAcceptRequest}
           onRejectPassengerRequest={handleRejectRequest}
+          onSelectPassengerRequest={handleSelectPassengerRequest}
           manualMarkerMode={(role === 'driver' && manualMarkerMode) || (role === 'passenger' && passengerManualMarkerMode)}
           onMapClick={handleMapClick}
           driverTripActive={role === 'driver' && tripStatus === 'active'}
@@ -3433,6 +3825,20 @@ const MapWorkspace = ({ role }) => {
             Relocate
           </button>
         </div>
+
+        {role === 'passenger' && selectedDriver && !activePassengerBooking && sentPassengerRequests.length === 0 ? (
+          <SelectedDriverCard
+            driver={selectedDriver}
+            hasPendingRequest={Boolean(selectedDriverPendingRequest)}
+            canRequest={
+              passengerDestinationConfirmed &&
+              !selectedDriverPendingRequest &&
+              Number(requestedSeats) <= Number(selectedDriver.seats ?? 0)
+            }
+            onRequestBooking={handlePassengerRequestBooking}
+            requestStatus={passengerRequestStatus}
+          />
+        ) : null}
 
         {role === 'driver' && acceptedRequest && quickChatOpen ? (
           <QuickMessageBox
@@ -3489,12 +3895,17 @@ const MapWorkspace = ({ role }) => {
             routeError={routeError}
             pendingRequests={pendingRequests}
             acceptedRequest={acceptedRequest}
+            selectedRequestId={selectedRequestId}
+            requestPreviewSummary={requestPreviewSummary}
+            requestPreviewStatus={requestPreviewStatus}
+            requestPreviewError={requestPreviewError}
             passengerPingStatus={passengerPingStatus}
             pickupRouteSummary={pickupRouteSummary}
             pickupRouteStatus={pickupRouteStatus}
             pickupRouteError={pickupRouteError}
             onAcceptRequest={handleAcceptRequest}
             onRejectRequest={handleRejectRequest}
+            onSelectRequest={handleSelectPassengerRequest}
             onCancelBooking={handleCancelBooking}
             onPickupPassenger={handlePickupPassenger}
             onPassengerDropoff={handlePassengerDropoff}
@@ -3537,6 +3948,8 @@ const MapWorkspace = ({ role }) => {
             onPayBooking={handlePassengerPayBooking}
             paymentSubmitting={passengerPaymentSubmitting}
             requestStatus={passengerRequestStatus}
+            onCopySafetyDetails={handleCopyPassengerSafetyDetails}
+            safetyCopyStatus={passengerSafetyCopyStatus}
           />
         )}
       </section>

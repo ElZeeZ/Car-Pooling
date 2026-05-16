@@ -52,7 +52,7 @@ const AppLayout = () => {
     <div className="app-shell">
       <aside className="sidebar">
         <div>
-          <p className="eyebrow">Smart Carpooling</p>
+          <p className="eyebrow">Routely</p>
           <h1>{user?.role ?? 'Account'}</h1>
         </div>
 

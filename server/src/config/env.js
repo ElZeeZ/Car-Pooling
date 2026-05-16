@@ -1,6 +1,10 @@
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 
-dotenv.config();
+const envPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../.env');
+
+dotenv.config({ path: envPath });
 
 const numberOrDefault = (value, fallback) => {
   const parsed = Number(value);

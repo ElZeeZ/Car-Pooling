@@ -3,7 +3,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { HttpError } from '../utils/httpError.js';
 
 const driverFields =
-  'driver_id, full_name, email, phone, license_number, verification_status, vehicle_info, available_seats, account_status, created_at';
+  'driver_id, full_name, email, phone, birth_date, license_number, verification_status, vehicle_info, available_seats, profile_image, rating_average, rating_count, account_status, created_at';
 
 export const listDrivers = asyncHandler(async (req, res) => {
   const rows = await query(

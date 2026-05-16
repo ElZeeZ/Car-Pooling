@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { testConnection } from '../config/db.js';
+import accountRoutes from './account.routes.js';
 import adminRoutes from './admin.routes.js';
 import authRoutes from './auth.routes.js';
 import bookingRoutes from './booking.routes.js';
@@ -25,6 +26,7 @@ router.get('/health', async (req, res, next) => {
 });
 
 router.use('/auth', authRoutes);
+router.use('/account', accountRoutes);
 router.use('/drivers', driverRoutes);
 router.use('/passengers', passengerRoutes);
 router.use('/trips', tripRoutes);

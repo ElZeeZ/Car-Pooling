@@ -5,7 +5,7 @@ const ROLE_CONFIG = {
     table: 'drivers',
     idColumn: 'driver_id',
     fields:
-      'driver_id AS id, full_name, email, phone, password_hash, license_number, verification_status, vehicle_info, available_seats, rating_average, rating_count, account_status'
+      'driver_id AS id, full_name, email, phone, birth_date, password_hash, license_number, verification_status, vehicle_info, available_seats, profile_image, rating_average, rating_count, account_status'
   },
   passenger: {
     table: 'passengers',
@@ -67,16 +67,24 @@ export const createDriver = async ({
   fullName,
   email,
   phone,
+  birthDate,
   passwordHash,
   licenseNumber,
   vehicleInfo,
-  availableSeats
+  availableSeats,
+  profileImage
 }) => {
   const result = await query(
     `INSERT INTO drivers
-      (full_name, email, phone, password_hash, license_number, vehicle_info, available_seats)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [fullName, email, phone, passwordHash, licenseNumber, vehicleInfo, availableSeats]
+      (full_name, email, phone, birth_date, password_hash, license_number, vehicle_info, available_seats, profile_image)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [fullName, email, phone, birthDate, passwordHash, licenseNumber, vehicleInfo, availableSeats, profileImage]
+  );
+
+  await query(
+    `INSERT INTO driver_vehicles (driver_id, license_number, vehicle_info, available_seats, is_active)
+     VALUES (?, ?, ?, ?, 1)`,
+    [result.insertId, licenseNumber, vehicleInfo, availableSeats]
   );
 
   return findUserByIdAndRole(result.insertId, 'driver');

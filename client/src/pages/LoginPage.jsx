@@ -14,6 +14,7 @@ const LoginPage = () => {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState(location.state?.notice ?? '');
   const [loading, setLoading] = useState(false);
+  const [roleSelection, setRoleSelection] = useState(null);
 
   const updateField = (event) => {
     setForm((current) => ({
@@ -26,10 +27,32 @@ const LoginPage = () => {
     event.preventDefault();
     setError('');
     setNotice('');
+    setRoleSelection(null);
     setLoading(true);
 
     try {
-      const user = await login(form);
+      const result = await login(form);
+
+      if (result.requiresRoleSelection) {
+        setRoleSelection(result);
+        return;
+      }
+
+      navigate(getHomePathForRole(result.role));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const signInWithRole = async (role) => {
+    setError('');
+    setNotice('');
+    setLoading(true);
+
+    try {
+      const user = await login({ ...form, role });
       navigate(getHomePathForRole(user.role));
     } catch (requestError) {
       setError(requestError.message);
@@ -48,7 +71,7 @@ const LoginPage = () => {
             <span className="route-car" />
             <span className="route-pin end" />
           </div>
-          <p className="eyebrow">Smart Carpooling</p>
+          <p className="eyebrow">Routely</p>
           <h2>Move through Lebanon together.</h2>
           <div className="auth-mini-grid">
             <span>Verified rides</span>
@@ -58,9 +81,17 @@ const LoginPage = () => {
         </div>
 
         <div className="auth-form-panel">
-          <div>
-            <p className="eyebrow">Smart Carpooling</p>
-            <h1 id="login-heading">Sign in</h1>
+          <div className="login-title-block">
+            <h1 id="login-heading" className="login-brand-title" aria-label="Routely">
+              <span className="brand-origin">R</span>
+              <span className="brand-word">outely</span>
+              <span className="brand-route" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+            </h1>
+            <p>Sign in</p>
           </div>
 
           {error ? <p className="alert">{error}</p> : null}
@@ -93,6 +124,38 @@ const LoginPage = () => {
           </p>
         </div>
       </section>
+
+      {roleSelection ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-card" aria-labelledby="choose-role-heading">
+            <h2 id="choose-role-heading">Choose account type</h2>
+            <p>This email has both passenger and driver accounts. Choose where to sign in.</p>
+
+            <div className="role-choice-grid">
+              {roleSelection.roles.map((role) => (
+                <button
+                  key={role}
+                  type="button"
+                  className="primary-button"
+                  onClick={() => signInWithRole(role)}
+                  disabled={loading}
+                >
+                  {role === 'driver' ? 'Driver' : 'Passenger'}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => setRoleSelection(null)}
+              disabled={loading}
+            >
+              Cancel
+            </button>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 };

@@ -38,7 +38,7 @@ const refreshDriverRatingWithConnection = async (connection, driverId) => {
     [driverId]
   );
   const ratingCount = Number(ratingRows[0]?.rating_count ?? 0);
-  const ratingAverage = ratingCount > 0 ? Number(ratingRows[0].average_rating).toFixed(2) : '4.80';
+  const ratingAverage = ratingCount > 0 ? Number(ratingRows[0].average_rating).toFixed(2) : null;
 
   await connection.execute(
     `UPDATE drivers
@@ -58,7 +58,7 @@ const refreshDriverRating = async (driverId) => {
     [driverId]
   );
   const ratingCount = Number(ratingRows[0]?.rating_count ?? 0);
-  const ratingAverage = ratingCount > 0 ? Number(ratingRows[0].average_rating).toFixed(2) : '4.80';
+  const ratingAverage = ratingCount > 0 ? Number(ratingRows[0].average_rating).toFixed(2) : null;
 
   await query(
     `UPDATE drivers
@@ -174,6 +174,8 @@ export const listBookings = asyncHandler(async (req, res) => {
        t.driver_current_lng,
        d.full_name AS driver_name,
        d.vehicle_info,
+       d.license_number,
+       d.profile_image,
        d.rating_average,
        d.rating_count
      FROM bookings b

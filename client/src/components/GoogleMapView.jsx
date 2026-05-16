@@ -80,9 +80,11 @@ const GoogleMapView = ({
   passengerDropoffMarkers = [],
   routePath,
   pickupRoutePath = [],
+  requestPreviewRoutePath = [],
   passengerRequests = [],
   onAcceptPassengerRequest,
   onRejectPassengerRequest,
+  onSelectPassengerRequest,
   manualMarkerMode,
   onMapClick,
   driverTripActive,
@@ -97,9 +99,11 @@ const GoogleMapView = ({
   const routeLayerRef = useRef(null);
   const lastRecenterSignalRef = useRef(0);
   const lastFittedRouteKeyRef = useRef('');
+  const lastFittedPreviewRouteKeyRef = useRef('');
   const callbacksRef = useRef({
     onAcceptPassengerRequest,
     onRejectPassengerRequest,
+    onSelectPassengerRequest,
     onSelectDriver
   });
 
@@ -107,9 +111,10 @@ const GoogleMapView = ({
     callbacksRef.current = {
       onAcceptPassengerRequest,
       onRejectPassengerRequest,
+      onSelectPassengerRequest,
       onSelectDriver
     };
-  }, [onAcceptPassengerRequest, onRejectPassengerRequest, onSelectDriver]);
+  }, [onAcceptPassengerRequest, onRejectPassengerRequest, onSelectDriver, onSelectPassengerRequest]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) {
@@ -198,10 +203,11 @@ const GoogleMapView = ({
       marker.bindPopup(`
         <strong>${driver.name}</strong><br />
         ${driver.route}<br />
-        ${driver.eta} away, ${driver.seats} ${driver.seats === 1 ? 'seat' : 'seats'}
+        ${driver.eta} away, ${driver.seats} ${driver.seats === 1 ? 'seat' : 'seats'}<br />
+        Rating: ${driver.rating ? Number(driver.rating).toFixed(1) : 'N/A'}
       `);
       marker.bindTooltip(
-        `<strong>${driver.name}</strong><br />${driver.route}<br />${driver.eta} away, ${driver.seats} ${driver.seats === 1 ? 'seat' : 'seats'}`,
+        `<strong>${driver.name}</strong><br />${driver.route}<br />${driver.eta} away, ${driver.seats} ${driver.seats === 1 ? 'seat' : 'seats'}<br />Rating: ${driver.rating ? Number(driver.rating).toFixed(1) : 'N/A'}`,
         {
           direction: 'top',
           offset: [0, -24],
@@ -226,7 +232,7 @@ const GoogleMapView = ({
             <small>${request.seats} ${request.seats === 1 ? 'seat' : 'seats'} requested</small>
             <small>${request.markerNote ?? formatMapCoordinates(request)}</small>
             ${
-              request.selected
+              request.accepted
                 ? ''
                 : `<div class="map-popup-actions">
                     <button type="button" data-action="accept">Accept</button>
@@ -247,6 +253,7 @@ const GoogleMapView = ({
           marker.closePopup();
         });
       });
+      marker.on('click', () => callbacksRef.current.onSelectPassengerRequest?.(request));
       marker.addTo(markerLayer);
     });
 
@@ -302,13 +309,20 @@ const GoogleMapView = ({
 
     routeLayer.clearLayers();
 
-    if (!routePath?.length && !pickupRoutePath?.length) {
+    if (!routePath?.length && !pickupRoutePath?.length && !requestPreviewRoutePath?.length) {
       lastFittedRouteKeyRef.current = '';
+      lastFittedPreviewRouteKeyRef.current = '';
       return;
     }
 
     let primaryRoute = null;
     let primaryRouteKey = '';
+    let previewRoute = null;
+    let previewRouteKey = '';
+
+    if (!requestPreviewRoutePath?.length) {
+      lastFittedPreviewRouteKeyRef.current = '';
+    }
 
     if (routePath?.length) {
       const points = routePath.map((point) => [point.lat, point.lng]);
@@ -334,6 +348,30 @@ const GoogleMapView = ({
       }).addTo(routeLayer);
     }
 
+    if (requestPreviewRoutePath?.length) {
+      const previewPoints = requestPreviewRoutePath.map((point) => [point.lat, point.lng]);
+      const firstPoint = requestPreviewRoutePath[0];
+      const lastPoint = requestPreviewRoutePath[requestPreviewRoutePath.length - 1];
+      previewRouteKey = `${requestPreviewRoutePath.length}:${firstPoint.lat.toFixed(5)},${firstPoint.lng.toFixed(5)}:${lastPoint.lat.toFixed(5)},${lastPoint.lng.toFixed(5)}`;
+      previewRoute = L.polyline(previewPoints, {
+        color: '#1d7ed0',
+        weight: 5,
+        opacity: 0.92,
+        dashArray: '4 10',
+        lineJoin: 'round'
+      }).addTo(routeLayer);
+    }
+
+    if (previewRoute && previewRouteKey !== lastFittedPreviewRouteKeyRef.current) {
+      lastFittedPreviewRouteKeyRef.current = previewRouteKey;
+      map.fitBounds(previewRoute.getBounds(), {
+        paddingTopLeft: [40, 90],
+        paddingBottomRight: [430, 70],
+        maxZoom: 15
+      });
+      return;
+    }
+
     if (primaryRoute && primaryRouteKey !== lastFittedRouteKeyRef.current) {
       lastFittedRouteKeyRef.current = primaryRouteKey;
       map.fitBounds(primaryRoute.getBounds(), {
@@ -342,7 +380,7 @@ const GoogleMapView = ({
         maxZoom: 15
       });
     }
-  }, [pickupRoutePath, routePath]);
+  }, [pickupRoutePath, requestPreviewRoutePath, routePath]);
 
   useEffect(() => {
     const map = mapRef.current;

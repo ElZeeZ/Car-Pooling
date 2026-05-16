@@ -17,7 +17,7 @@ const addresses = Object.values(interfaces)
 const uniqueAddresses = [...new Set(addresses)];
 
 console.log('');
-console.log('Smart Carpooling LAN dev');
+console.log('Routely LAN dev');
 console.log(`Frontend: http://localhost:${clientPort}`);
 console.log(`Backend:  http://localhost:${apiPort}/api/health`);
 

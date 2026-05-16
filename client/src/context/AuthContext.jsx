@@ -17,8 +17,17 @@ export const AuthProvider = ({ children }) => {
     setUser(nextUser);
   }, []);
 
+  const saveUser = useCallback((nextUser) => {
+    localStorage.setItem('carpooling_user', JSON.stringify(nextUser));
+    setUser(nextUser);
+  }, []);
+
   const login = async (credentials) => {
     const result = await api.post('/auth/login', credentials);
+    if (result.requiresRoleSelection) {
+      return result;
+    }
+
     saveSession(result);
     return result.user;
   };
@@ -42,6 +51,70 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('carpooling_user');
     setUser(null);
   }, []);
+
+  const refreshAccount = useCallback(async () => {
+    const result = await api.get('/account');
+
+    if (result.user) {
+      saveUser(result.user);
+    }
+
+    return result;
+  }, [saveUser]);
+
+  const updateAccountProfile = useCallback(
+    async (payload) => {
+      const result = await api.patch('/account/profile', payload);
+
+      if (result.user) {
+        saveUser(result.user);
+      }
+
+      return result;
+    },
+    [saveUser]
+  );
+
+  const updateAccountPassword = useCallback((payload) => api.patch('/account/password', payload), []);
+
+  const addDriverVehicle = useCallback(
+    async (payload) => {
+      const result = await api.post('/account/vehicles', payload);
+
+      if (result.user) {
+        saveUser(result.user);
+      }
+
+      return result;
+    },
+    [saveUser]
+  );
+
+  const selectDriverVehicle = useCallback(
+    async (vehicleId) => {
+      const result = await api.patch(`/account/vehicles/${vehicleId}/active`, {});
+
+      if (result.user) {
+        saveUser(result.user);
+      }
+
+      return result;
+    },
+    [saveUser]
+  );
+
+  const deleteDriverVehicle = useCallback(
+    async (vehicleId) => {
+      const result = await api.delete(`/account/vehicles/${vehicleId}`);
+
+      if (result.user) {
+        saveUser(result.user);
+      }
+
+      return result;
+    },
+    [saveUser]
+  );
 
   useEffect(() => {
     if (!user) {
@@ -78,9 +151,24 @@ export const AuthProvider = ({ children }) => {
       login,
       logout,
       registerPassenger,
-      registerDriver
+      registerDriver,
+      refreshAccount,
+      updateAccountProfile,
+      updateAccountPassword,
+      addDriverVehicle,
+      selectDriverVehicle,
+      deleteDriverVehicle
     }),
-    [user]
+    [
+      addDriverVehicle,
+      deleteDriverVehicle,
+      logout,
+      refreshAccount,
+      selectDriverVehicle,
+      updateAccountPassword,
+      updateAccountProfile,
+      user
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

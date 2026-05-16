@@ -9,7 +9,16 @@ const initialCard = {
   expiryYear: ''
 };
 
+const CARD_NUMBER_MIN_LENGTH = 13;
+const CARD_NUMBER_MAX_LENGTH = 19;
+const cardholderNamePattern = /^[\p{L}](?:[\p{L}\s'.-]{0,118}[\p{L}])?$/u;
+
 const cardEndingLabel = (card) => `Card ending in ${String(card.last_four ?? '').slice(-2).padStart(2, '0')}`;
+
+const formatCardholderName = (value) =>
+  value.replace(/[^\p{L}\s'.-]/gu, '').replace(/\s{2,}/g, ' ').slice(0, 120);
+
+const formatDigits = (value, maxLength) => value.replace(/\D/g, '').slice(0, maxLength);
 
 const WalletPage = () => {
   const { user } = useAuth();
@@ -50,15 +59,39 @@ const WalletPage = () => {
   }, []);
 
   const handleChange = (field, value) => {
+    const nextValue =
+      field === 'cardholderName'
+        ? formatCardholderName(value)
+        : field === 'cardNumber'
+          ? formatDigits(value, CARD_NUMBER_MAX_LENGTH)
+          : field === 'expiryMonth'
+            ? formatDigits(value, 2)
+            : field === 'expiryYear'
+              ? formatDigits(value, 4)
+              : value;
+
     setCardForm((currentForm) => ({
       ...currentForm,
-      [field]: value
+      [field]: nextValue
     }));
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
     setCardMessage('');
+
+    if (!cardholderNamePattern.test(cardForm.cardholderName.trim())) {
+      setCardMessage('Cardholder name must contain letters, spaces, apostrophes, periods, or hyphens only.');
+      return;
+    }
+
+    if (
+      cardForm.cardNumber.length < CARD_NUMBER_MIN_LENGTH ||
+      cardForm.cardNumber.length > CARD_NUMBER_MAX_LENGTH
+    ) {
+      setCardMessage('Card number must contain 13 to 19 digits only.');
+      return;
+    }
 
     try {
       await api.post('/wallet/cards', cardForm);
@@ -167,7 +200,8 @@ const WalletPage = () => {
             <input
               value={cardForm.cardholderName}
               onChange={(event) => handleChange('cardholderName', event.target.value)}
-              placeholder="Name on card"
+              autoComplete="cc-name"
+              maxLength="120"
             />
           </label>
           <label>
@@ -175,8 +209,11 @@ const WalletPage = () => {
             <input
               value={cardForm.cardNumber}
               onChange={(event) => handleChange('cardNumber', event.target.value)}
-              placeholder="Test card number"
               inputMode="numeric"
+              autoComplete="cc-number"
+              minLength={CARD_NUMBER_MIN_LENGTH}
+              maxLength={CARD_NUMBER_MAX_LENGTH}
+              pattern="[0-9]{13,19}"
             />
           </label>
           <div className="form-grid">
@@ -185,8 +222,10 @@ const WalletPage = () => {
               <input
                 value={cardForm.expiryMonth}
                 onChange={(event) => handleChange('expiryMonth', event.target.value)}
-                placeholder="MM"
                 inputMode="numeric"
+                autoComplete="cc-exp-month"
+                maxLength="2"
+                pattern="[0-9]{1,2}"
               />
             </label>
             <label>
@@ -194,8 +233,10 @@ const WalletPage = () => {
               <input
                 value={cardForm.expiryYear}
                 onChange={(event) => handleChange('expiryYear', event.target.value)}
-                placeholder="YYYY"
                 inputMode="numeric"
+                autoComplete="cc-exp-year"
+                maxLength="4"
+                pattern="[0-9]{4}"
               />
             </label>
           </div>
